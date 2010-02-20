@@ -1,0 +1,28 @@
+0.3.3a	Bug workaround for 64-bit Windows *only*.
+
+0.3.3	Speed improvements for 64-bit, ~3% on Core 2, ~13% on Athlon64.
+
+	The alternate algorithm no longer uses SSE2 on 64-bit.  So the switch
+	is now "--alt"; "--sse2" is deprecated.
+
+	Shell script selects the alternate algorithm for AMD processors.
+
+	Linux binary minimum requirements: kernel 2.6.15, GlibC 2.3.4
+
+0.3.2a	A very tiny bugfix that only affects you if you try to run with fewer
+	than the maximum number of N's.
+
+	Also doubled the speed...of reading the input ABCD file.
+
+0.3.2	Added an option to choose between the default and alternate SSE2 
+	algorithms, when possible.  Also tweaked benchmark very slightly.
+
+	Fixed an ETA bug that went out in the Windows apps, but not Linux.
+	Windows apps are now built within Linux with Wine to prevent mismatches.
+
+0.3.1	Added an improved AMD/32-bit SSE2 algorithm that works on larger P.
+	Added a shell script that auto-detects processor type and count.
+
+0.3.0	New algorithm for sieving wide n ranges based on tpsieve by Geoff
+	Reynolds and Ken Brazier.
+

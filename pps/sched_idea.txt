@@ -1,0 +1,154 @@
+New idea:
+1. Find the LSB of K with (K & -K)
+	a. nx = xor(nK, nK)
+	b. nx = subq(nK, K)
+	c. nx = andl(nK, K)
+2. Subtract 1 so it's all 1's below the number in the worst case.  Might as well be 32-bit, since mul is 32-bit, and 0-1 = all 1's.  This limits the range to kmax < P < 2^32*kmax, and kmax < 2^32
+3. Multiply kmax+1 by (unsigned int)that LSB
+4. Add kmax+1 (or sub it from the original K?)
+5. Compare the values: sub and get high bits.
+
+Our formula is:
+k - kmax <= kmax * (2^d-1)
+
+Now, suppose d is 33 in reality, but we can't multiply that.  So this is what is calculated, which doesn't work:
+
+k - kmax <= kmax * (2^d/2-1)
+
+But we can make the inequality still true in all such cases.  Multiply kmax by 2:
+
+k - kmax*2 <= kmax*2 * (2^d/2-1)
+k - kmax*2 <= kmax*2 * 2^d/2 - kmax*2
+k - kmax*2 <= kmax * 2^d - kmax*2
+k - kmax <= kmax * 2^d - kmax	 (add kmax to both sides.)
+k - kmax <= kmax * (2^d-1)
+
+So it works in the worst case.  But 2^d-1 might not be truncated.
+k - kmax*2 <= kmax*2 * (2^d-1)
+
+So this will produce some false positives, but not more than 1-1/(d-31) of the total hits, I think.  Hits at this level happen only once in 4 billion times, so that's OK.
+
+Note that this doesn't fix the case of kmax >= 2^32.  That is also something to check for in this case.  Fixing that would require dividing 2^d by some power of 2, which is a whole other mess.
+
+
+// This limits the range to kmax < P < 2^32*kmax, and kmax < 2^32
+mk = _mm_load_si128((__m128i*)(&K[i]));
+mt = _mm_load_si128((__m128i*)(&P[i]));
+// 1. Find the LSB of K with (K & -K)
+nk = _mm_xor_si128(nk, nk);
+nt = _mm_xor_si128(nt, nt);
+mt = _mm_sub_epi64(mt, mk);   // mt = P-K
+nk = _mm_sub_epi64(nk, mk);
+nt = _mm_sub_epi64(nt, mt);
+nk = _mm_and_si128(nk, mk);
+//4. Add kmax+1 (or sub it from the original K?)
+mk = _mm_sub_epi64(mk, mkmax);	// No longer using original mk, so fix it here.
+nt = _mm_and_si128(nt, mt);
+//2. Subtract 1 so it's all 1's below the number in the worst case.  Might as well be 32-bit, since mul is 32-bit, and 0-1 = all 1's. 
+nk = _mm_sub_epi32(nk, mones);
+nt = _mm_sub_epi32(nt, mones);
+mt = _mm_sub_epi64(mt, mkmax);	// No longer using original mt, so fix it here.
+//3. Multiply kmax+1 by (unsigned int)that LSB
+nk = _mm_mul_epu32(nk, mkmax);
+nt = _mm_mul_epu32(nt, mkmax);
+//5. Compare the values: sub and get high bits.
+mk = _mm_sub_epi64(mk, nk);
+mt = _mm_sub_epi64(mt, nt);
+bitsk = _mm_movemask_epi8(mk);
+bitst = _mm_movemask_epi8(mt);
+if ((bitsk & 0x80)) {
+  uint64_t kpos;
+  unsigned int mpos;
+  kpos = K[i];
+  mpos = __builtin_ctzll(kpos);
+  kpos >>= mpos;
+
+  if (/* kpos <= kmax &&*/ kpos >= kmin && mpos < nstep)
+    test_factor(P[i],kpos,n+mpos,-1);
+}
+if ((bitsk & 0x8000)) {
+  uint64_t kpos;
+  unsigned int mpos;
+  kpos = K[i+1];
+  mpos = __builtin_ctzll(kpos);
+  kpos >>= mpos;
+
+  if (/* kpos <= kmax &&*/ kpos >= kmin && mpos < nstep)
+    test_factor(P[i+1],kpos,n+mpos,-1);
+}
+if ((bitst & 0x80)) {
+  uint64_t kpos;
+  unsigned int mpos;
+  kpos = P[i]-K[i];
+  mpos = __builtin_ctzll(kpos);
+  kpos >>= mpos;
+
+  if (/* kpos <= kmax &&*/ kpos >= kmin && mpos < nstep)
+    test_factor(P[i],kpos,n+mpos,+1);
+}
+if ((bitst & 0x8000)) {
+  uint64_t kpos;
+  unsigned int mpos;
+  kpos = P[i+1]-K[i+1];
+  mpos = __builtin_ctzll(kpos);
+  kpos >>= mpos;
+
+  if (/* kpos <= kmax &&*/ kpos >= kmin && mpos < nstep)
+    test_factor(P[i+1],kpos,n+mpos,+1);
+}
+
+
+Cases:
+1. Kmax << n <= x
+2. Kmax << n > x
+3. 
+
+K		T		mxor		mbit
+(Load K)			
+K		(Load P)
+		P		K		K
+		.				K&1
+		P-K				.
+				K^(P-K)		(1&K)-1
+				K^(P-K)|0	(Load P)
+K|P		P|K		(Load K)	(P)
+.		(Writ/1)	(K)			( Do this with Write T; T = mones; K-=mkmax;)
+O-mkmax		(K&1)				(.)
+sgn(O-mkmax)	psubd(K&1, mones)		(P-K)	
+(PmovmskB)	pshufd(mbit, A0)
+(		(1&K)-1		K		P-K)	- Currently (0 cycles here)
+(K				K^(P-K)		)
+(		P-K		K^(P-K)|0	(Load P))	
+
+
+New algorithm, for one K only:
+MK		NK
+(Load K)	XOR
+K
+		-K
+.		-K&K
+K-kmax		(K&-K)-1
+		.
+		.
+		((K&-K)-1)*kmax
+.
+K-kmax-((K&-K)-1)*kmax
+.
+movemask()
+
+New algorithm, for one K only:
+MK		NK		MK2		NK2
+(Load K)	XOR
+K
+		-K
+		-K&K
+.
+K-kmax		(K&-K)-1
+-----------------------------------------------------
+		.		(Load K2 anytime)XOR
+		.		K2
+		((K&-K)-1)*kmax			-K2
+.						-K2&K2
+K-kmax-((K&-K)-1)*kmax		.
+.				K2-kmax		(K2&-K2)-1
+movemask()			MK=MK2		NK=NK2

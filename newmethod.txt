@@ -1,0 +1,29 @@
+Method 2 for multiplying, based on the Collatz Conjecture optimization:
+
+Essentially:
+1. For each possible value of kl, precompute the result for that kl, with p.
+	Precomputation time for each p = klbits*2^klbits. (klbits=8 => 2048its!)
+2. Split k into kl (x bits), and kh (the rest).
+3. The result = kh+f(kl)
+
+Does that work? Yes - Excel confirms it! Is it fast enough?
+- Have to break up the 32-36 bit jumps into 8 or so bits at a time.
+- Add an argument, -b, --bitsatatime, to tweak that.  Pick the largest multiple of b without going over the maximum.
+- Estimate anywhere from a little slower to 2x as fast!  Plus it's usable on video cards!!! :)
+
+k0&((1<<1)-1) = 0 => k1 = k0/2
+k0&((1<<1)-1) = 1 => k1 = (k0+p)/2
+
+
+k0&((1<<2)-1) = 00 => k1 = k0/4
+k0&((1<<2)-1) = 01 => k1 = ((k0+p)/2+[0,p]))/2
+	ki = 01+x1 = 10+x0 = ~x
+k0&((1<<2)-1) = 01 => k1 = ((k0+p)/2+(p&2)?0:p))/2
+k0&((1<<2)-1) = 10 => k1 = (k0/2+p)/2
+k0&((1<<2)-1) = 11 => k1 = ((k0+p)/2+(p&2)?p:0))/2
+p =  1100101
+
+k1 = 1110101
+
+
+1/(0.000325274+0.003904979)

@@ -1,0 +1,319 @@
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls   s/call   s/call  name    
+ 93.06    644.33   644.33   265382     0.00     0.00  check_ns
+  6.78    691.28    46.96        1    46.96    46.97  app_init
+  0.15    692.35     1.07  1592292     0.00     0.00  fillbitskip
+  0.02    692.47     0.12       58     0.00     0.00  sieve
+  0.01    692.55     0.08   265382     0.00     0.00  app_thread_fun
+  0.00    692.57     0.02        1     0.02     0.02  app_fini
+  0.00    692.58     0.01  1999939     0.00     0.00  xmalloc
+  0.00    692.59     0.01                             thread_fun
+  0.00    692.59     0.00      296     0.00     0.00  test_factor
+  0.00    692.59     0.00      192     0.00     0.00  get_chunk
+  0.00    692.59     0.00      191     0.00     0.00  free_chunk
+  0.00    692.59     0.00       18     0.00     0.00  elapsed_usec
+  0.00    692.59     0.00       17     0.00     0.00  processor_usec
+  0.00    692.59     0.00       16     0.00     0.00  processor_cycles
+  0.00    692.59     0.00       15     0.00     0.00  next_chunk
+  0.00    692.59     0.00       11     0.00     0.00  parse_option
+  0.00    692.59     0.00        6     0.00     0.00  parse_uint64
+  0.00    692.59     0.00        4     0.00     0.00  parse_uint
+  0.00    692.59     0.00        3     0.00     0.00  app_thread_fun1
+  0.00    692.59     0.00        3     0.00     0.00  app_write_checkpoint
+  0.00    692.59     0.00        3     0.00     0.00  init_residues
+  0.00    692.59     0.00        3     0.00     0.00  write_checkpoint
+  0.00    692.59     0.00        2     0.00     0.00  app_parse_option
+  0.00    692.59     0.00        2     0.00     0.00  create_sieve_data
+  0.00    692.59     0.00        1     0.00     0.00  app_banner
+  0.00    692.59     0.00        1     0.00     0.00  app_thread_fini
+  0.00    692.59     0.00        1     0.00     0.00  app_thread_init
+  0.00    692.59     0.00        1     0.00     0.00  create_sieve
+  0.00    692.59     0.00        1     0.00     0.00  destroy_sieve
+  0.00    692.59     0.00        1     0.00     0.00  free_sieve_primes
+  0.00    692.59     0.00        1     0.00     0.11  init_sieve_primes
+  0.00    692.59     0.00        1     0.00     0.00  thread_cleanup
+  0.00    692.59     0.00        1     0.00     0.00  xrealloc
+
+ %         the percentage of the total running time of the
+time       program used by this function.
+
+cumulative a running sum of the number of seconds accounted
+ seconds   for by this function and those listed above it.
+
+ self      the number of seconds accounted for by this
+seconds    function alone.  This is the major sort for this
+           listing.
+
+calls      the number of times this function was invoked, if
+           this function is profiled, else blank.
+ 
+ self      the average number of milliseconds spent in this
+ms/call    function per call, if this function is profiled,
+	   else blank.
+
+ total     the average number of milliseconds spent in this
+ms/call    function and its descendents per call, if this 
+	   function is profiled, else blank.
+
+name       the name of the function.  This is the minor sort
+           for this listing. The index shows the location of
+	   the function in the gprof listing. If the index is
+	   in parenthesis it shows where it would appear in
+	   the gprof listing if it were to be printed.
+
+		     Call graph (explanation follows)
+
+
+granularity: each sample hit covers 2 byte(s) for 0.00% of 692.59 seconds
+
+index % time    self  children    called     name
+                                                 <spontaneous>
+[1]     93.2    0.01  645.49                 thread_fun [1]
+                0.08  645.39  265380/265382      app_thread_fun [2]
+                0.00    0.01     192/192         get_chunk [10]
+                0.00    0.00       3/3           app_thread_fun1 [12]
+                0.00    0.00     191/191         free_chunk [16]
+                0.00    0.00       1/1           app_thread_init [30]
+                0.00    0.00       1/1           app_thread_fini [29]
+                0.00    0.00       1/1           thread_cleanup [33]
+-----------------------------------------------
+                0.00    0.00       2/265382      app_thread_fun1 [12]
+                0.08  645.39  265380/265382      thread_fun [1]
+[2]     93.2    0.08  645.40  265382         app_thread_fun [2]
+              644.33    1.07  265382/265382      check_ns [3]
+-----------------------------------------------
+              644.33    1.07  265382/265382      app_thread_fun [2]
+[3]     93.2  644.33    1.07  265382         check_ns [3]
+                1.07    0.00 1592292/1592292     fillbitskip [6]
+                0.00    0.00     296/296         test_factor [15]
+-----------------------------------------------
+                                                 <spontaneous>
+[4]      6.8    0.00   47.09                 main [4]
+               46.96    0.01       1/1           app_init [5]
+                0.00    0.11       1/1           init_sieve_primes [8]
+                0.02    0.00       1/1           app_fini [9]
+                0.00    0.00       1/1           create_sieve [13]
+                0.00    0.00       1/1999939     xmalloc [11]
+                0.00    0.00      18/18          elapsed_usec [17]
+                0.00    0.00      17/17          processor_usec [18]
+                0.00    0.00      16/16          processor_cycles [19]
+                0.00    0.00      15/15          next_chunk [20]
+                0.00    0.00      11/11          parse_option [21]
+                0.00    0.00       4/4           parse_uint [23]
+                0.00    0.00       3/3           write_checkpoint [26]
+                0.00    0.00       2/2           app_parse_option [27]
+                0.00    0.00       2/6           parse_uint64 [22]
+                0.00    0.00       1/1           app_banner [28]
+                0.00    0.00       1/1           destroy_sieve [31]
+                0.00    0.00       1/1           free_sieve_primes [32]
+-----------------------------------------------
+               46.96    0.01       1/1           main [4]
+[5]      6.8   46.96    0.01       1         app_init [5]
+                0.01    0.00 1999932/1999939     xmalloc [11]
+-----------------------------------------------
+                1.07    0.00 1592292/1592292     check_ns [3]
+[6]      0.2    1.07    0.00 1592292         fillbitskip [6]
+-----------------------------------------------
+                0.01    0.00       6/58          get_chunk [10]
+                0.11    0.00      52/58          init_sieve_primes [8]
+[7]      0.0    0.12    0.00      58         sieve [7]
+-----------------------------------------------
+                0.00    0.11       1/1           main [4]
+[8]      0.0    0.00    0.11       1         init_sieve_primes [8]
+                0.11    0.00      52/58          sieve [7]
+                0.00    0.00       2/2           create_sieve_data [14]
+                0.00    0.00       1/1999939     xmalloc [11]
+                0.00    0.00       1/1           xrealloc [34]
+-----------------------------------------------
+                0.02    0.00       1/1           main [4]
+[9]      0.0    0.02    0.00       1         app_fini [9]
+-----------------------------------------------
+                0.00    0.01     192/192         thread_fun [1]
+[10]     0.0    0.00    0.01     192         get_chunk [10]
+                0.01    0.00       6/58          sieve [7]
+-----------------------------------------------
+                0.00    0.00       1/1999939     main [4]
+                0.00    0.00       1/1999939     init_sieve_primes [8]
+                0.00    0.00       2/1999939     create_sieve_data [14]
+                0.00    0.00       3/1999939     create_sieve [13]
+                0.01    0.00 1999932/1999939     app_init [5]
+[11]     0.0    0.01    0.00 1999939         xmalloc [11]
+-----------------------------------------------
+                0.00    0.00       3/3           thread_fun [1]
+[12]     0.0    0.00    0.00       3         app_thread_fun1 [12]
+                0.00    0.00       2/265382      app_thread_fun [2]
+-----------------------------------------------
+                0.00    0.00       1/1           main [4]
+[13]     0.0    0.00    0.00       1         create_sieve [13]
+                0.00    0.00       3/1999939     xmalloc [11]
+                0.00    0.00       1/3           init_residues [25]
+-----------------------------------------------
+                0.00    0.00       2/2           init_sieve_primes [8]
+[14]     0.0    0.00    0.00       2         create_sieve_data [14]
+                0.00    0.00       2/1999939     xmalloc [11]
+                0.00    0.00       2/3           init_residues [25]
+-----------------------------------------------
+                0.00    0.00     296/296         check_ns [3]
+[15]     0.0    0.00    0.00     296         test_factor [15]
+-----------------------------------------------
+                0.00    0.00     191/191         thread_fun [1]
+[16]     0.0    0.00    0.00     191         free_chunk [16]
+-----------------------------------------------
+                0.00    0.00      18/18          main [4]
+[17]     0.0    0.00    0.00      18         elapsed_usec [17]
+-----------------------------------------------
+                0.00    0.00      17/17          main [4]
+[18]     0.0    0.00    0.00      17         processor_usec [18]
+-----------------------------------------------
+                0.00    0.00      16/16          main [4]
+[19]     0.0    0.00    0.00      16         processor_cycles [19]
+-----------------------------------------------
+                0.00    0.00      15/15          main [4]
+[20]     0.0    0.00    0.00      15         next_chunk [20]
+-----------------------------------------------
+                0.00    0.00      11/11          main [4]
+[21]     0.0    0.00    0.00      11         parse_option [21]
+-----------------------------------------------
+                0.00    0.00       2/6           main [4]
+                0.00    0.00       4/6           parse_uint [23]
+[22]     0.0    0.00    0.00       6         parse_uint64 [22]
+-----------------------------------------------
+                0.00    0.00       4/4           main [4]
+[23]     0.0    0.00    0.00       4         parse_uint [23]
+                0.00    0.00       4/6           parse_uint64 [22]
+-----------------------------------------------
+                0.00    0.00       3/3           write_checkpoint [26]
+[24]     0.0    0.00    0.00       3         app_write_checkpoint [24]
+-----------------------------------------------
+                0.00    0.00       1/3           create_sieve [13]
+                0.00    0.00       2/3           create_sieve_data [14]
+[25]     0.0    0.00    0.00       3         init_residues [25]
+-----------------------------------------------
+                0.00    0.00       3/3           main [4]
+[26]     0.0    0.00    0.00       3         write_checkpoint [26]
+                0.00    0.00       3/3           app_write_checkpoint [24]
+-----------------------------------------------
+                0.00    0.00       2/2           main [4]
+[27]     0.0    0.00    0.00       2         app_parse_option [27]
+-----------------------------------------------
+                0.00    0.00       1/1           main [4]
+[28]     0.0    0.00    0.00       1         app_banner [28]
+-----------------------------------------------
+                0.00    0.00       1/1           thread_fun [1]
+[29]     0.0    0.00    0.00       1         app_thread_fini [29]
+-----------------------------------------------
+                0.00    0.00       1/1           thread_fun [1]
+[30]     0.0    0.00    0.00       1         app_thread_init [30]
+-----------------------------------------------
+                0.00    0.00       1/1           main [4]
+[31]     0.0    0.00    0.00       1         destroy_sieve [31]
+-----------------------------------------------
+                0.00    0.00       1/1           main [4]
+[32]     0.0    0.00    0.00       1         free_sieve_primes [32]
+-----------------------------------------------
+                0.00    0.00       1/1           thread_fun [1]
+[33]     0.0    0.00    0.00       1         thread_cleanup [33]
+-----------------------------------------------
+                0.00    0.00       1/1           init_sieve_primes [8]
+[34]     0.0    0.00    0.00       1         xrealloc [34]
+-----------------------------------------------
+
+ This table describes the call tree of the program, and was sorted by
+ the total amount of time spent in each function and its children.
+
+ Each entry in this table consists of several lines.  The line with the
+ index number at the left hand margin lists the current function.
+ The lines above it list the functions that called this function,
+ and the lines below it list the functions this one called.
+ This line lists:
+     index	A unique number given to each element of the table.
+		Index numbers are sorted numerically.
+		The index number is printed next to every function name so
+		it is easier to look up where the function in the table.
+
+     % time	This is the percentage of the `total' time that was spent
+		in this function and its children.  Note that due to
+		different viewpoints, functions excluded by options, etc,
+		these numbers will NOT add up to 100%.
+
+     self	This is the total amount of time spent in this function.
+
+     children	This is the total amount of time propagated into this
+		function by its children.
+
+     called	This is the number of times the function was called.
+		If the function called itself recursively, the number
+		only includes non-recursive calls, and is followed by
+		a `+' and the number of recursive calls.
+
+     name	The name of the current function.  The index number is
+		printed after it.  If the function is a member of a
+		cycle, the cycle number is printed between the
+		function's name and the index number.
+
+
+ For the function's parents, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the function into this parent.
+
+     children	This is the amount of time that was propagated from
+		the function's children into this parent.
+
+     called	This is the number of times this parent called the
+		function `/' the total number of times the function
+		was called.  Recursive calls to the function are not
+		included in the number after the `/'.
+
+     name	This is the name of the parent.  The parent's index
+		number is printed after it.  If the parent is a
+		member of a cycle, the cycle number is printed between
+		the name and the index number.
+
+ If the parents of the function cannot be determined, the word
+ `<spontaneous>' is printed in the `name' field, and all the other
+ fields are blank.
+
+ For the function's children, the fields have the following meanings:
+
+     self	This is the amount of time that was propagated directly
+		from the child into the function.
+
+     children	This is the amount of time that was propagated from the
+		child's children to the function.
+
+     called	This is the number of times the function called
+		this child `/' the total number of times the child
+		was called.  Recursive calls by the child are not
+		listed in the number after the `/'.
+
+     name	This is the name of the child.  The child's index
+		number is printed after it.  If the child is a
+		member of a cycle, the cycle number is printed
+		between the name and the index number.
+
+ If there are any cycles (circles) in the call graph, there is an
+ entry for the cycle-as-a-whole.  This entry shows who called the
+ cycle (as parents) and the members of the cycle (as children.)
+ The `+' recursive calls entry shows the number of function calls that
+ were internal to the cycle, and the calls entry for each member shows,
+ for that member, how many times it was called from other members of
+ the cycle.
+
+
+Index by function name
+
+  [28] app_banner             [14] create_sieve_data (sieve.c) [23] parse_uint
+   [9] app_fini               [31] destroy_sieve          [22] parse_uint64
+   [5] app_init               [17] elapsed_usec           [19] processor_cycles
+  [27] app_parse_option        [6] fillbitskip            [18] processor_usec
+  [29] app_thread_fini        [16] free_chunk              [7] sieve (sieve.c)
+   [2] app_thread_fun         [32] free_sieve_primes      [15] test_factor (app.c)
+  [12] app_thread_fun1        [10] get_chunk              [33] thread_cleanup (main.c)
+  [30] app_thread_init        [25] init_residues (sieve.c) [1] thread_fun (main.c)
+  [24] app_write_checkpoint    [8] init_sieve_primes      [26] write_checkpoint (main.c)
+   [3] check_ns               [20] next_chunk             [11] xmalloc
+  [13] create_sieve           [21] parse_option (main.c)  [34] xrealloc

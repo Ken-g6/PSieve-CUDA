@@ -1,0 +1,17 @@
+- Place kmax and nmax in __constant__ memory.
+- Work with blocks of e.g. 128 P's.  ***Grid size? (Should be multiple of 6?)
+- Initialize the K's from the P's 6 at a time?  (Or 4?)
+- KernelPSearch<<<1, 128, 0, threads(4)>>>(const unsigned long long *p, unsigned char *fac_range) {
+	unsigned long long lp, k;
+	unsigned int i, lfr;	// Iterator, local fac_range.
+	lp = p[threadidx.x];
+	lfr = 0;
+	k = (unsigned long long)1;
+
+	for(i=1; i <= nmax; i++) {
+		k += (((unsigned int)k)&1)?p:0;
+		k >>= 1;
+		lfr |= ((k<=kmax)?1:0);	// A 1 is expected to be rare.
+	}
+	fac_range[threadidx.x] = (char)lfr;
+}

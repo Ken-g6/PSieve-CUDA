@@ -1,0 +1,57 @@
+First I should explain the SSE2 completion of the floating point multiplication.  SSE2 can't do a full 64-bit multiply, but it can do a 32-bit*32-bit=64-bit multiply.  So the first part is just two regular school-arithmetic multiplies, where each "digit" is 32-bits long, except the result is truncated to 64 bits.  
+[code]
+  AB
+x CD
+----
+  BD
+ AD
++BC
+----
+  YZ
+[/code]
+I just forget about A*C since its entire result would be above the 64-bit range of the result.  When squaring, it's a little easier:
+[code]
+   AB
+x  AB
+-----
+   BB
++2AB
+-----
+   YZ
+[/code]
+After that, I write the result and then check whether the result is >= P by subtraction.  If K >= P, K-P >= 0; hence if the high bit is not set after the subtraction, I do K -= P.  SSE2 doesn't do if's, but it lets you extract the high bits of a register (which contains 2 64-bit numbers in this case) and they can be checked with if's outside of SSE2.  In cases where a result is rare, like here, it's faster to do that.
+
+Now obviously the new algorithm, with two if's per check, poses a bit of a challenge in SSE2.  My first idea was that in one of those cases, K or K-P, the number is odd and "d" is 0.  The obvious use for this is to precompute K-P and let 32-bit code sort out which is which.  This is faster, but not by much.  A better approach involves separating the odds from the evens, saving out the evens to be processed with 32-bit code, and processing the odds in SSE2.  Without if's, this is a challenge!  My solution comes from [url=http://graphics.stanford.edu/~seander/bithacks.html#SwappingValuesXOR]an old in-place swapping trick[/url]:
+
+Given A = A0, B = B0, and "^" is the Exclusive OR instruction:
+1. A ^= B (so now A = A0^B0)
+2. B ^= A (so now B = B0^(A0^B0).  The B0's cancel, leaving A0.)
+3. A ^= B (so now A = (A0^B0)^A0.  The A0's cancel, leaving B0.)
+
+So, I get K and P, compute K-P, K^(K-P), and (K&1)-1.  This last effectively turns the low bit of K into a register with either all 1's or all 0's.  I then AND this with K^(K-P) so that it's either K^(K-P) if K was even, or 0 if K was odd.  I then XOR that value (K^(K-P)|0) with both K and K-P, so that the K register holds both the odd values and the other register holds both the even values.  I then save off the even values to the T(emp) array, to be worked on later with 32-bit code, and check whether the odd values are <= kmax, by the same kind of logic I use at the end of the multiply code.
+
+I would have liked to find d (the number of low 0's) and shifted it out in SSE2, but SSE2 has neither a lower zero count instruction nor a shift that can shift different distances in different parts of the register.  However, if I take the inequality:
+
+k >> d <= kmax
+
+and rearrange it:
+
+k / 2^d <= kmax
+k <= kmax * 2^d
+
+Well, there is [url=http://aggregate.org/MAGIC/#Trailing%20Zero%20Count]a method for finding 2^d[/url] without conditionals (x AND -x).  And there is an SSE2 multiply instruction.  However, the multiply only does 32-bit*32-bit -> 64-bit.  So for this method to work, both kmax and what it multiplies by have to be < 2^32.  So this sets a limit on kmax; but if d >= 32 (which it can be), 2^d in 32-bit would be 0.  My solution is one more rearrangement:
+
+k <= kmax * (2^d-1) + kmax
+
+That's heavy on the right-side calculation, so I switched one thing over to the left, so it can be computed in parallel:
+
+k - kmax <= kmax * (2^d-1)
+
+Now look at the [url=http://en.wikipedia.org/wiki/Edge_case]edge cases[/url].  For large d, 2^d-1 = 2^32-1.  k <= kmax * 2^32 is true if P (which k is less than) is < kmax*2^32.  For d=0 on the other hand, which happens half the time when K is odd, we have:
+
+k - kmax <= kmax * 0
+k - kmax <= 0
+k <= kmax
+
+Exactly what you'd expect.  So this method works, and is 80% as fast as 64-bit, but only when P < kmax*2^32, and when kmax < 2^32.  Otherwise I fall back to the above algorithm, which is "only" 70% as fast as 64-bit.
+

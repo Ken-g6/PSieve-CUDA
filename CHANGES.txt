@@ -1,0 +1,44 @@
+0.3.3	- Makefile
+
+0.3.2	- pps changes
+	- Using a new checkpoint file named based on pmin.  Will read old files.
+	- Backend changes to more fully integrate --quiet.
+	
+0.3.0	- pps/
+	- ETA in status reports
+	- Status reports on a single line when --quiet.
+	
+0.2.4 Set thread priority for Windows
+
+
+0.2.3 Parse integer arguments 3k as 3*2^10, 5b5 as 5*2^5, etc.
+      Nk = N*2^10    NK = N*10^3
+      Nm = N*2^20    NM = N*10^6
+      Ng = N*2^30    NG = N*10^9
+      Nt = N*2^40    NT = N*10^12
+      Np = N*2^50    NP = N*10^15
+      NbM = N*2^M    NeM = N*10^M      
+      NBM = N*2^M    NEM = N*10^M      
+
+      blocksize option in bytes instead of kilobytes.
+
+      priority=none cancels any previous priority option.
+
+
+0.2.2 Changes in tps/
+
+
+0.2.1 Fixed --qmax option.
+
+
+0.2.0 Reorganized the Sieve of Eratosthenes code so that a large block of
+      candidates can be sieved and then broken up into smaller chunks for
+      allocation by individual threads. A thread can be sieving one block of
+      candidates while other threads allocate chunks from a different block.
+
+
+0.1.1 Worked around a stack alignment bug in the MinGW32 _beginthreadex
+      function.
+
+
+0.1.0 Release for testing.

@@ -1,0 +1,37 @@
+# Configuration file for tpsieve.
+#
+# option=arg in this file is overridden by --option=arg on the command-line.
+#
+
+# Time between checkpoints, in seconds.
+checkpoint=300
+
+# Time between status reports, in seconds.
+report=60
+
+# Process priority: idle,low,normal,none, or a number 0 (normal) to 19 (idle).
+priority=low
+
+# Sieve block size, in bytes. Should not exceed L2 cache size.
+blocksize=512k
+
+# Sieve chunk size, in bytes. Smaller chunks require more communication
+# between threads but result in less time wasted when threads must
+# synchronise, e.g. for checkpoints and program termination.
+chunksize=16k
+
+# Sieve candidate factors using primes up to qmax. Default is sqrt(pmax).
+# For large N ranges, leave this at the default.
+#qmax=10e6
+
+# Deactivate or attempt to force use of the "alternate algorithm".
+#
+# No =	Never use the alternate algorithm.
+# Yes =	Try very hard to use the alternate (SSE2/x86-64) algorithm.
+# 	It is never activated if K >= 2^32 or K*P >= 2^64.
+# Bench=On 64-bit, benchmark and try to find the best algorithm.
+# 	On 32-bit SSE2, same as Yes.  (Default in both cases.)
+alt=Bench
+
+# Uncomment to prevent printing of factors to STDOUT
+#quiet
