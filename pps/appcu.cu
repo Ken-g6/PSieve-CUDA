@@ -79,21 +79,16 @@ unsigned int cuda_app_init(int gpuno)
 #ifndef NDEBUG
   fprintf(stderr, "Available memory = %d bytes\n", (int)(gpuprop.totalGlobalMem));
 #endif
-  ld_bitsatatime = 1;
-  ld_bitsmask = 2;
-  while(ld_bitsmask*cthread_count < i) {
+  ld_bitsatatime = 3;
+  ld_bitsmask = 8;
+  /*while(ld_bitsmask*cthread_count < i) {
     ld_bitsmask <<= 1;
     ld_bitsatatime++;
     if(ld_bitsatatime >= 13) break;
-  }
-
-  if(ld_bitsatatime <= 1 || ld_nstep/ld_bitsatatime >= 12) {
-    fprintf(stderr, "Insufficient memory on GPU %d.\n", gpuno);
-    return 0;
-  }
+  }*/
 
   // Allocate device arrays:
-  while(ld_bitsatatime >= 2) {
+  while(1) {
     // - d_bitsskip[] (Biggest array first.)
     // Not using cudaMallocPitch because coalescing isn't possible in general.
     if(cudaMalloc((void**)&d_bitsskip, ld_bitsmask*cthread_count*sizeof(uint64_t)) == cudaSuccess) {
@@ -115,16 +110,9 @@ unsigned int cuda_app_init(int gpuno)
       }
       cudaFree(d_bitsskip);
     }
-    // If things didn't fit, try a smaller ld_bitsatatime.
-    ld_bitsatatime--;
-    ld_bitsmask >>= 1;
-  }
-
-  if(ld_bitsatatime <= 1 || ld_nstep/ld_bitsatatime >= 12) {
     fprintf(stderr, "Insufficient available memory on GPU %d.\n", gpuno);
     return 0;
   }
-
 
   ld_bitsmask--; // Finalize bitsmask
 
@@ -166,13 +154,14 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
   uint64_t *bs0 = &bitsskip[i*d_len];
   uint64_t k0;
   uint64_t kpos;
-  unsigned char my_factor_found = 0;
+  uint64_t res0;
+  unsigned int my_factor_found = 0;
   // Initialize bitsskip array.
   k0 = P[i];
 
   // Initialize the first two entries.
   bs0[d_halflen] = (k0+1)/2;	// Needed first.
-  bs0[0] = 0;			// Ignored through the end.
+  // bs0[0] will be dealt with later.
 
   // Fill in the intervening spaces, two numbers at a time.
   for(i=d_halflen; i > 1; i >>= 1) {
@@ -185,23 +174,42 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
       bs0[n+d_halflen] = (kpos+1+((my_factor_found)?(uint64_t)0:k0))/2;
     }
   }
+  // Now convert the entries to multiples of 1/8*P, plus some small constant.
+  res0 = 0;
+  k0 >>= 3;
+  // Might as well skip 0, which is always 0.
+  for(i=1; i < d_len; i++) {
+    kpos = bs0[i];
+    n = (unsigned int)(kpos/k0);
+    my_factor_found = (unsigned int)(kpos-(((uint64_t)n)*k0));
+    res0 |= ((((uint64_t)my_factor_found)<<32) | n) << (3*i);
+  }
+  bs0[i] = res0;
 }
 
 // Check all N's.
 __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found_arr, uint64_t *bitsskip) {
   unsigned int n = d_nmin; // = nmin;
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-  uint64_t *bs0 = &bitsskip[i*d_len];
   uint64_t k0;
   uint64_t kpos;
   unsigned char my_factor_found = 0;
-#ifndef NDEBUG
-  uint64_t my_P = P[i];
-#endif
+  uint64_t my_P;
+  unsigned int shift;
+  // bs0[i] = (uint64_t)((mul_shift>>(3*(((unsigned int)k0)&7)))&7)*my_P+((off_shift>>(3*(((unsigned int)k0)&7)))&7)
+  // let shift=(3*(((unsigned int)k0)&7))
+  // bs0[i] = (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7)
+  // So, k0 = (k0 >> 3) + (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7);
+  unsigned int mul_shift, off_shift;
 
   //factor_found_arr[i] = 0;
   k0 = K[i];
-  if(d_search_proth) k0 = P[i]-k0;
+  my_P = bitsskip[i*d_len];
+  mul_shift = (unsigned int)my_P;
+  off_shift = (unsigned int)(my_P >> 32);
+  my_P = P[i];
+  
+  if(d_search_proth) k0 = my_P-k0;
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     kpos = k0;
@@ -217,7 +225,8 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
     }
 
     for(i=0; i < d_bpernstep; i++) {
-      k0 = (k0 >> d_bitsatatime) + bs0[(unsigned int)k0 & d_bitsmask];
+      shift=3*(((unsigned int)k0)&7);
+      k0 = (k0 >> 3) + (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7);
     }
     n += d_nstep;
   } while (n < d_nmax);
