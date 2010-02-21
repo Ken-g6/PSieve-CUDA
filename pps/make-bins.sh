@@ -18,7 +18,7 @@ if [ "$kernel" != "" ] ; then export LD_ASSUME_KERNEL=$kernel ; fi
 #gcc -Wall -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -march=k8 -mno-3dnow -mtune=core2 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c app.c -lm -lpthread
 # --ptxas-options=-v : Print the number of registers used by each kernel.
 # -deviceemu : compile for the CPU emulator.
-nvcc -deviceemu --ptxas-options=-v -O3 -g -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c appcu.cu app.c -lm -lpthread
+nvcc --ptxas-options=-v -O3 -g -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c appcu.cu app.c -lm -lpthread
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
 #
 #if [ -f /multimedia/mingw64/bin/x86_64-w64-mingw32-gcc.exe ] ; then

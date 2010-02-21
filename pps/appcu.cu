@@ -58,6 +58,7 @@ unsigned int cuda_app_init(int gpuno)
     fprintf(stderr, "GPU %d not compute-capable.\n", gpuno);
     return 0;
   }
+  cudaSetDevice(gpuno);
   fprintf(stderr, "Detected GPU %d: %s\n", gpuno, gpuprop.name);
   fprintf(stderr, "Detected compute capability: %d.%d\n", gpuprop.major, gpuprop.minor);
   fprintf(stderr, "Detected %d multiprocessors.\n", gpuprop.multiProcessorCount);
