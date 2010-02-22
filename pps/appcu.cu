@@ -184,7 +184,7 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
     my_factor_found = (unsigned int)(kpos-(((uint64_t)n)*k0));
     res0 |= ((((uint64_t)my_factor_found)<<32) | n) << (3*i);
   }
-  bs0[i] = res0;
+  bs0[0] = res0;
 }
 
 // Check all N's.
@@ -196,6 +196,9 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   unsigned char my_factor_found = 0;
   uint64_t my_P;
   unsigned int shift;
+#ifndef NDEBUG
+  uint64_t *bs0 = &bitsskip[i*d_len];
+#endif
   // bs0[i] = (uint64_t)((mul_shift>>(3*(((unsigned int)k0)&7)))&7)*my_P+((off_shift>>(3*(((unsigned int)k0)&7)))&7)
   // let shift=(3*(((unsigned int)k0)&7))
   // bs0[i] = (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7)
@@ -210,6 +213,7 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   my_P = P[i];
   
   if(d_search_proth) k0 = my_P-k0;
+  my_P >>= 3;
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     kpos = k0;
@@ -226,7 +230,10 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
 
     for(i=0; i < d_bpernstep; i++) {
       shift=3*(((unsigned int)k0)&7);
-      k0 = (k0 >> 3) + (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7);
+#ifndef NDEBUG
+      assert((shift == 0 && ((uint64_t)((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7)) == 0) || (bs0[(unsigned int)k0 & 7] == ((uint64_t)((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7))));
+#endif
+      k0 = (k0 >> 3) + ((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7);
     }
     n += d_nstep;
   } while (n < d_nmax);
