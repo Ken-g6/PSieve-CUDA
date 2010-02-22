@@ -66,7 +66,7 @@ unsigned int cuda_app_init(int gpuno)
 
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
-  cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?512:1024;
+  cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*48) {
