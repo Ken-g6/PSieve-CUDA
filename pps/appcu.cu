@@ -19,6 +19,9 @@
 #include "app.h"
 #include "appcu.h"
 #define INLINE static inline
+#define BITSATATIME 4
+#define BITSMASK 15
+//((1<<BITSATATIME)-1)
 
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
@@ -29,7 +32,7 @@ __constant__ unsigned int d_bitsatatime;
 __constant__ unsigned int d_len;//=(1<<bitsatatime); 
 __constant__ unsigned int d_halflen;//=(1<<bitsatatime)/2; 
 __constant__ uint64_t d_kmax;
-__constant__ unsigned int d_bitsmask;
+//__constant__ unsigned int d_bitsmask;
 __constant__ unsigned int d_bpernstep;
 __constant__ unsigned int d_nmin;
 __constant__ unsigned int d_nmax;
@@ -79,8 +82,8 @@ unsigned int cuda_app_init(int gpuno)
 #ifndef NDEBUG
   fprintf(stderr, "Available memory = %d bytes\n", (int)(gpuprop.totalGlobalMem));
 #endif
-  ld_bitsatatime = 3;
-  ld_bitsmask = 8;
+  ld_bitsatatime = BITSATATIME;
+  ld_bitsmask = BITSMASK+1;
   /*while(ld_bitsmask*cthread_count < i) {
     ld_bitsmask <<= 1;
     ld_bitsatatime++;
@@ -88,6 +91,7 @@ unsigned int cuda_app_init(int gpuno)
   }*/
 
   // Allocate device arrays:
+  // TODO: fix this awkward construct.
   while(1) {
     // - d_bitsskip[] (Biggest array first.)
     // Not using cudaMallocPitch because coalescing isn't possible in general.
@@ -135,7 +139,7 @@ unsigned int cuda_app_init(int gpuno)
   i >>= 1;
   cudaMemcpyToSymbol(d_halflen, &i, sizeof(i));//=(1<<bitsatatime)/2; 
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
-  cudaMemcpyToSymbol(d_bitsmask, &ld_bitsmask, sizeof(ld_bitsmask));
+  //cudaMemcpyToSymbol(d_bitsmask, &ld_bitsmask, sizeof(ld_bitsmask));
   cudaMemcpyToSymbol(d_bpernstep, &ld_bpernstep, sizeof(ld_bpernstep));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
   cudaMemcpyToSymbol(d_nmax, &nmax, sizeof(nmax));
@@ -148,13 +152,14 @@ unsigned int cuda_app_init(int gpuno)
 
 
 // Set up the lookup tables for all P's.
+// TODO: Fix the variable names here to be more descriptive.
 __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
   unsigned int n; // = nmin;
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   uint64_t *bs0 = &bitsskip[i*d_len];
   uint64_t k0;
   uint64_t kpos;
-  uint64_t res0;
+  uint64_t mul_shift = 0, off_shift = 0;
   unsigned int my_factor_found = 0;
   // Initialize bitsskip array.
   k0 = P[i];
@@ -175,16 +180,16 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
     }
   }
   // Now convert the entries to multiples of 1/8*P, plus some small constant.
-  res0 = 0;
-  k0 >>= 3;
+  k0 >>= BITSATATIME;
   // Might as well skip 0, which is always 0.
   for(i=1; i < d_len; i++) {
     kpos = bs0[i];
     n = (unsigned int)(kpos/k0);
-    my_factor_found = (unsigned int)(kpos-(((uint64_t)n)*k0));
-    res0 |= ((((uint64_t)my_factor_found)<<32) | n) << (3*i);
+    mul_shift |= ((uint64_t)n) << (BITSATATIME*i);
+    off_shift |= (kpos-(((uint64_t)n)*k0)) << (BITSATATIME*i);
   }
-  bs0[0] = res0;
+  bs0[0] = mul_shift;
+  bs0[1] = off_shift;
 }
 
 // Check all N's.
@@ -199,21 +204,16 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
 #ifndef NDEBUG
   uint64_t *bs0 = &bitsskip[i*d_len];
 #endif
-  // bs0[i] = (uint64_t)((mul_shift>>(3*(((unsigned int)k0)&7)))&7)*my_P+((off_shift>>(3*(((unsigned int)k0)&7)))&7)
-  // let shift=(3*(((unsigned int)k0)&7))
-  // bs0[i] = (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7)
-  // So, k0 = (k0 >> 3) + (uint64_t)((mul_shift>>shift)&7)*my_P+((off_shift>>shift)&7);
-  unsigned int mul_shift, off_shift;
+  uint64_t mul_shift, off_shift;
 
   //factor_found_arr[i] = 0;
   k0 = K[i];
-  my_P = bitsskip[i*d_len];
-  mul_shift = (unsigned int)my_P;
-  off_shift = (unsigned int)(my_P >> 32);
+  mul_shift = bitsskip[i*d_len];
+  off_shift = bitsskip[i*d_len+1];
   my_P = P[i];
   
   if(d_search_proth) k0 = my_P-k0;
-  my_P >>= 3;
+  my_P >>= BITSATATIME;
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     kpos = k0;
@@ -229,11 +229,14 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
     }
 
     for(i=0; i < d_bpernstep; i++) {
-      shift=3*(((unsigned int)k0)&7);
+      shift=BITSATATIME*(((unsigned int)k0)&BITSMASK);
 #ifndef NDEBUG
-      assert((shift == 0 && ((uint64_t)((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7)) == 0) || (bs0[(unsigned int)k0 & 7] == ((uint64_t)((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7))));
+      if(shift > BITSATATIME && (bs0[(unsigned int)k0 & BITSMASK] != ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)))) {
+        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", (unsigned int)k0 & BITSMASK, bs0[(unsigned int)k0 & BITSMASK], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
+      }
+      assert((shift == 0 && ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK) == 0)) || shift == BITSATATIME || (bs0[(unsigned int)k0 & BITSMASK] == ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK))));
 #endif
-      k0 = (k0 >> 3) + ((mul_shift>>shift)&7)*my_P + ((off_shift>>shift)&7);
+      k0 = (k0 >> BITSATATIME) + (((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK);
     }
     n += d_nstep;
   } while (n < d_nmax);
