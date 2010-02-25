@@ -258,8 +258,8 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
 }
 
-// Pass the arguments to the CUDA device, run the code, and get the results.
-void check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found, unsigned int cthread_count) {
+// Pass the first arguments to the CUDA device and do setup.
+void setup_ps(const uint64_t *P, unsigned int cthread_count) {
   cudaError_t res;
 #ifndef NDEBUG
   fprintf(stderr, "In check_ns...\n");
@@ -275,7 +275,13 @@ void check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found,
 #ifndef NDEBUG
   fprintf(stderr, "Memcpy successful...\n");
 #endif
+  // Setup the lookup tables with P's.
   d_setup_ps<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_bitsskip);
+}
+
+// Pass the remaining arguments to the CUDA device, run the code, and get the results.
+void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsigned int cthread_count) {
+
 #ifndef NDEBUG
   fprintf(stderr, "Setup successful...\n");
 #endif

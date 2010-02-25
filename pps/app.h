@@ -46,7 +46,7 @@ int app_parse_option(int opt, char *arg, const char *source);
 void app_help(void);
 void app_init(void);
 unsigned int app_thread_init(int th);
-void app_thread_fun(int th, uint64_t *P, uint64_t *K, unsigned int cthread_count);
+void app_thread_fun(int th, const uint64_t *P, uint64_t *K, unsigned int cthread_count);
 //void app_thread_fun(int th, uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K);
 void app_thread_fun1(int th, uint64_t *P, uint64_t *K, unsigned int cthread_count, unsigned int len);
 void app_thread_fini(int th);

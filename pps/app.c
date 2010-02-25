@@ -773,7 +773,7 @@ inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
   }
 }
 // Given APP_BUFLEN P's, calculate the appropriate K's to start with, based on nmin.
-void init_ks(uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K)
+void init_ks(const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K)
 {
   uint64_t T[APP_BUFLEN] __attribute__((aligned(16)));
 #if (APP_BUFLEN >= 7)
@@ -1098,9 +1098,11 @@ void init_ks(uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
    P is an array of APP_BUFLEN candidate primes.
 */
-void app_thread_fun(int th, uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K, unsigned int cthread_count)
+void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K, unsigned int cthread_count)
 {
   unsigned int i;
+  // Set up tables on the GPU.
+  setup_ps(P, cthread_count);
   // Initialize all K's from P's.
   for(i=0; i < cthread_count-APP_BUFLEN; i+=APP_BUFLEN) {
     init_ks(&P[i], &K[i]);
