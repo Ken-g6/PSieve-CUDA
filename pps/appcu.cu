@@ -20,19 +20,18 @@
 #include "appcu.h"
 #define INLINE static inline
 #define BITSATATIME 4
-#define BITSMASK 15
-//((1<<BITSATATIME)-1)
+#define BITSMASK ((1<<BITSATATIME)-1)
+// BLOCKSIZE should be a power of two for greatest efficiency.
+#define BLOCKSIZE 128
 
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
-//unsigned int gpuno;
 
 // Device constants
 __constant__ unsigned int d_bitsatatime;
 __constant__ unsigned int d_len;//=(1<<bitsatatime); 
 __constant__ unsigned int d_halflen;//=(1<<bitsatatime)/2; 
 __constant__ uint64_t d_kmax;
-//__constant__ unsigned int d_bitsmask;
 __constant__ unsigned int d_bpernstep;
 __constant__ unsigned int d_nmin;
 __constant__ unsigned int d_nmax;
@@ -84,11 +83,6 @@ unsigned int cuda_app_init(int gpuno)
 #endif
   ld_bitsatatime = BITSATATIME;
   ld_bitsmask = BITSMASK+1;
-  /*while(ld_bitsmask*cthread_count < i) {
-    ld_bitsmask <<= 1;
-    ld_bitsatatime++;
-    if(ld_bitsatatime >= 13) break;
-  }*/
 
   // Allocate device arrays:
   // TODO: fix this awkward construct.
@@ -139,7 +133,6 @@ unsigned int cuda_app_init(int gpuno)
   i >>= 1;
   cudaMemcpyToSymbol(d_halflen, &i, sizeof(i));//=(1<<bitsatatime)/2; 
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
-  //cudaMemcpyToSymbol(d_bitsmask, &ld_bitsmask, sizeof(ld_bitsmask));
   cudaMemcpyToSymbol(d_bpernstep, &ld_bpernstep, sizeof(ld_bpernstep));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
   cudaMemcpyToSymbol(d_nmax, &nmax, sizeof(nmax));
@@ -154,62 +147,64 @@ unsigned int cuda_app_init(int gpuno)
 // Set up the lookup tables for all P's.
 // TODO: Fix the variable names here to be more descriptive.
 __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
-  unsigned int n; // = nmin;
-  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-  uint64_t *bs0 = &bitsskip[i*d_len];
-  uint64_t k0;
+  unsigned int n, i;
+  uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
+  uint64_t my_P;
   uint64_t kpos;
   uint64_t mul_shift = 0, off_shift = 0;
   unsigned int my_factor_found = 0;
   // Initialize bitsskip array.
-  k0 = P[i];
+  my_P = P[blockIdx.x * BLOCKSIZE + threadIdx.x];
 
   // Initialize the first two entries.
-  bs0[d_halflen] = (k0+1)/2;	// Needed first.
-  // bs0[0] will be dealt with later.
+  bs0[BLOCKSIZE*d_halflen] = (my_P+1)/2;	// Needed first.
+  // bs0[0] will be ignored; it's just 0.
 
   // Fill in the intervening spaces, two numbers at a time.
   for(i=d_halflen; i > 1; i >>= 1) {
     for(n=i/2; n < d_halflen; n+=i) {
-      kpos = bs0[2*n];
+      kpos = bs0[BLOCKSIZE*2*n];
       my_factor_found = ((unsigned int)kpos)&1;
       //printf("Filling n=%d from bs0=%lu\n", n, kpos);
-      bs0[n] = (kpos+((my_factor_found)?k0:(uint64_t)0))/2;
+      bs0[BLOCKSIZE*n] = (kpos+((my_factor_found)?my_P:(uint64_t)0))/2;
       //printf("Filling n=%d\n", n+d_halflen);
-      bs0[n+d_halflen] = (kpos+1+((my_factor_found)?(uint64_t)0:k0))/2;
+      bs0[BLOCKSIZE*(n+d_halflen)] = (kpos+1+((my_factor_found)?(uint64_t)0:my_P))/2;
     }
   }
   // Now convert the entries to multiples of 1/8*P, plus some small constant.
-  k0 >>= BITSATATIME;
+  my_P >>= BITSATATIME;
   // Might as well skip 0, which is always 0.
   for(i=1; i < d_len; i++) {
-    kpos = bs0[i];
-    n = (unsigned int)(kpos/k0);
+    kpos = bs0[i*BLOCKSIZE];
+    n = (unsigned int)(kpos/my_P);
     mul_shift |= ((uint64_t)n) << (BITSATATIME*i);
-    off_shift |= (kpos-(((uint64_t)n)*k0)) << (BITSATATIME*i);
+    off_shift |= (kpos-(((uint64_t)n)*my_P)) << (BITSATATIME*i);
   }
+  // Coalesce memory reads/writes in smaller areas, one per block.
   bs0[0] = mul_shift;
-  bs0[1] = off_shift;
+  bs0[BLOCKSIZE] = off_shift;
 }
 
 // Check all N's.
 __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found_arr, uint64_t *bitsskip) {
   unsigned int n = d_nmin; // = nmin;
-  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   uint64_t k0;
   uint64_t kpos;
   unsigned char my_factor_found = 0;
   uint64_t my_P;
   unsigned int shift;
 #ifndef NDEBUG
-  uint64_t *bs0 = &bitsskip[i*d_len];
+  uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
 #endif
   uint64_t mul_shift, off_shift;
 
   //factor_found_arr[i] = 0;
+  i = blockIdx.x * BLOCKSIZE*d_len + threadIdx.x;
+  mul_shift = bitsskip[i];
+  off_shift = bitsskip[i+BLOCKSIZE];
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   k0 = K[i];
-  mul_shift = bitsskip[i*d_len];
-  off_shift = bitsskip[i*d_len+1];
   my_P = P[i];
   
   if(d_search_proth) k0 = my_P-k0;
@@ -222,7 +217,7 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
     kpos >>= i;
     if (kpos <= d_kmax) {
 #ifndef NDEBUG
-      fprintf(stderr, "%u | %u*2^%u+1 (P[%d])\n", (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * blockDim.x + threadIdx.x);
+      fprintf(stderr, "%u | %u*2^%u+1 (P[%d])\n", (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
       my_factor_found = 1;
@@ -231,16 +226,16 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
     for(i=0; i < d_bpernstep; i++) {
       shift=BITSATATIME*(((unsigned int)k0)&BITSMASK);
 #ifndef NDEBUG
-      if(shift > BITSATATIME && (bs0[(unsigned int)k0 & BITSMASK] != ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)))) {
-        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", (unsigned int)k0 & BITSMASK, bs0[(unsigned int)k0 & BITSMASK], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
+      if(shift > BITSATATIME && (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] != ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)))) {
+        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", (unsigned int)k0 & BITSMASK, bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
       }
-      assert((shift == 0 && ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK) == 0)) || shift == BITSATATIME || (bs0[(unsigned int)k0 & BITSMASK] == ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK))));
+      assert((shift == 0 && ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK) == 0)) || shift == BITSATATIME || (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] == ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK))));
 #endif
       k0 = (k0 >> BITSATATIME) + (((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK);
     }
     n += d_nstep;
   } while (n < d_nmax);
-  factor_found_arr[blockIdx.x * blockDim.x + threadIdx.x] = my_factor_found;
+  factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
 }
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
@@ -260,7 +255,7 @@ void check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found,
 #ifndef NDEBUG
   fprintf(stderr, "Memcpy successful...\n");
 #endif
-  d_setup_ps<<<cthread_count/128,128>>>(d_P, d_bitsskip);
+  d_setup_ps<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_bitsskip);
 #ifndef NDEBUG
   fprintf(stderr, "Setup successful...\n");
 #endif
