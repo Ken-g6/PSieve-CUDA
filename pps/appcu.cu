@@ -23,7 +23,13 @@
 #define BITSMASK ((1<<BITSATATIME)-1)
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
-
+#if(BITSATATIME == 3)
+  #define SHIFT_CAST unsigned int
+#elif(BITSATATIME == 4)
+  #define SHIFT_CAST uint64_t
+#else
+  #error "Invalid BITSATATIME."
+#endif
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
 
@@ -151,7 +157,7 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
   uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
   uint64_t my_P;
   uint64_t kpos;
-  uint64_t mul_shift = 0, off_shift = 0;
+  SHIFT_CAST mul_shift = 0, off_shift = 0;
   unsigned int my_factor_found = 0;
   // Initialize bitsskip array.
   my_P = P[blockIdx.x * BLOCKSIZE + threadIdx.x];
@@ -177,12 +183,18 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
   for(i=1; i < d_len; i++) {
     kpos = bs0[i*BLOCKSIZE];
     n = (unsigned int)(kpos/my_P);
-    mul_shift |= ((uint64_t)n) << (BITSATATIME*i);
-    off_shift |= (kpos-(((uint64_t)n)*my_P)) << (BITSATATIME*i);
+    mul_shift |= ((SHIFT_CAST)n) << (BITSATATIME*i);
+    off_shift |= (kpos-(((SHIFT_CAST)n)*my_P)) << (BITSATATIME*i);
   }
-  // Coalesce memory reads/writes in smaller areas, one per block.
+
+#if(BITSATATIME == 3)
+  bs0[0] = (((uint64_t)off_shift)<<32) + mul_shift;
+#elif(BITSATATIME == 4)
   bs0[0] = mul_shift;
   bs0[BLOCKSIZE] = off_shift;
+#else
+  #error "Invalid BITSATATIME."
+#endif
 }
 
 // Check all N's.
@@ -197,12 +209,20 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
 #ifndef NDEBUG
   uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
 #endif
-  uint64_t mul_shift, off_shift;
+  SHIFT_CAST mul_shift, off_shift;
 
   //factor_found_arr[i] = 0;
   i = blockIdx.x * BLOCKSIZE*d_len + threadIdx.x;
+#if(BITSATATIME == 3)
+  my_P = bitsskip[i];
+  mul_shift = (unsigned int)my_P;
+  off_shift = (unsigned int)(my_P >> 32);
+#elif(BITSATATIME == 4)
   mul_shift = bitsskip[i];
   off_shift = bitsskip[i+BLOCKSIZE];
+#else
+  #error "Invalid BITSATATIME."
+#endif
   i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   k0 = K[i];
   my_P = P[i];
