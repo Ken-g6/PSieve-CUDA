@@ -1,0 +1,6 @@
+# pps files to ignore:
+# - Results file:
+ppfactors.txt
+
+# Binaries:
+ppsieve-*-linux
