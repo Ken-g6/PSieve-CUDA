@@ -14,7 +14,9 @@
 
 #include <stdint.h>
 
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 /* Time elapsed since some fixed base time. */
 uint64_t elapsed_usec(void);
 
@@ -23,5 +25,7 @@ uint64_t processor_usec(void);
 
 /* CPU cycles */
 uint64_t processor_cycles(void);
-
+#ifdef __cplusplus
+}
+#endif
 #endif /* _CLOCK_H */

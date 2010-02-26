@@ -18,8 +18,12 @@
 #include "util.h"
 #include "app.h"
 #include "appcu.h"
+#include "cuda_sleep_memcpy.h"
+
 #define INLINE static inline
+#ifndef BITSATATIME
 #define BITSATATIME 4
+#endif
 #define BITSMASK ((1<<BITSATATIME)-1)
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
@@ -49,6 +53,10 @@ uint64_t *d_K;
 uint64_t *d_bitsskip;
 unsigned char *d_factor_found;
 
+// Timing variables:
+const int setup_ps_overlap = 5000;
+const int check_ns_overlap = 50000;
+
 /* This function is called once before any threads are started.
  */
 unsigned int cuda_app_init(int gpuno)
@@ -70,7 +78,7 @@ unsigned int cuda_app_init(int gpuno)
   fprintf(stderr, "Detected GPU %d: %s\n", gpuno, gpuprop.name);
   fprintf(stderr, "Detected compute capability: %d.%d\n", gpuprop.major, gpuprop.minor);
   fprintf(stderr, "Detected %d multiprocessors.\n", gpuprop.multiProcessorCount);
-  fprintf(stderr, "Detected %lu bytes of device memory.\n", gpuprop.totalGlobalMem);
+  //fprintf(stderr, "Detected %lu bytes of device memory.\n", gpuprop.totalGlobalMem);
 
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
@@ -281,12 +289,13 @@ void setup_ps(const uint64_t *P, unsigned int cthread_count) {
 
 // Pass the remaining arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsigned int cthread_count) {
-
+  // timing variables:
+  static __thread int setup_ps_delay = 0, check_ns_delay = 0;
 #ifndef NDEBUG
   fprintf(stderr, "Setup successful...\n");
 #endif
   // Pass K.
-  if(cudaMemcpy(d_K, K, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice) != cudaSuccess) {
+  if(cudaSleepMemcpy(d_K, K, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice, &setup_ps_delay, setup_ps_overlap) != cudaSuccess) {
     fprintf(stderr, "Memcpy2 error!\n");
     exit(1);
   }
@@ -298,7 +307,7 @@ void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsig
   fprintf(stderr, "Main kernel successful...\n");
 #endif
   // Get d_factor_found, into the thread'th factor_found array.
-  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+  cudaSleepMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &check_ns_delay, check_ns_overlap);
 #ifndef NDEBUG
   fprintf(stderr, "Retrieve successful...\n");
 #endif
