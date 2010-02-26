@@ -4,20 +4,16 @@ PMAX=##G
 
 # Leave the rest of this stuff alone.
 # It automatically finds the best version and number of cores.
-SIEVEFILE=ppse_37TE1.txt
-PROCS=`grep '^flags' /proc/cpuinfo | wc -l`
+SIEVEFILE=`ls ppse_*.txt | tail -1`
 MACHINE_TYPE=`uname -m`
 if [ "$MACHINE_TYPE" == "x86_64" ]; then
-  APP=ppsieve-x86_64-linux
-  if grep "AMD" /proc/cpuinfo > /dev/null ; then
-    ALT="-a yes"
-  fi
+  APP=ppsieve-cuda-x86_64-linux
 else
-  if grep '^flags' /proc/cpuinfo | grep sse2 > /dev/null ; then
-    APP=ppsieve-x86-linux-sse2
-  else
-    APP=ppsieve-x86-linux
-  fi
+  #if grep '^flags' /proc/cpuinfo | grep sse2 > /dev/null ; then
+    #APP=ppsieve-cuda-x86-linux-sse2
+  #else
+    APP=ppsieve-cuda-x86-linux
+  #fi
 fi
 
 if [ "$PMIN" = "##G" -o "$PMAX" = "##G" ] ; then
@@ -26,8 +22,8 @@ if [ "$PMIN" = "##G" -o "$PMAX" = "##G" ] ; then
 	exit
 fi
 
-echo Running $APP with $PROCS threads.
-if ./$APP -p$PMIN -P$PMAX -i$SIEVEFILE -ffppse_$PMIN-$PMAX.txt -t$PROCS -q $ALT $* ; then
+echo Running $APP.
+if ./$APP -p$PMIN -P$PMAX -i$SIEVEFILE -ffppse_$PMIN-$PMAX.txt -q $* ; then
 	echo Run completed successfully!
 else
 	if [ ! -f $SIEVEFILE ] ; then
@@ -39,7 +35,7 @@ else
 	echo Downloading source
 	mkdir src
 	cd src
-	wget -O src.zip http://home.att.net/~k.brazier/programs/ppsieve-src.zip
+	wget -O src.zip "http://sites.google.com/site/kenscode/prime-programs/ppsieve-cuda.zip?attredirects=0&d=1"
 	unzip src.zip
 	make
 	cp pps/$APP ..
@@ -48,7 +44,7 @@ else
 	rmdir src/pps
 	rm -f src/*
 	rmdir src
-	if ./$APP -p$PMIN -P$PMAX -ippse_37TE1.txt -ffppse_$PMIN-$PMAX.txt -t$PROCS -q $ALT $* ; then
+	if ./$APP -p$PMIN -P$PMAX -i$SIEVEFILE -ffppse_$PMIN-$PMAX.txt -q $* ; then
 		echo Run completed successfully!
 	else
 		echo 'Error after building from source.  Sorry. :('

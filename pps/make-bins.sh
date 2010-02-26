@@ -1,5 +1,5 @@
 appname=ppsieve-cuda
-DOEMU=-deviceemu
+#DOEMU=-deviceemu
 #cleanvars="-fomit-frame-pointer -s"
 #cleanvars="-s"
 if uname -a | grep " 2.6.28[^ ]* [^ a-zA-Z]*Ubuntu" > /dev/null ; then 
