@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 
-#define APP_VERSION "cuda-0.1.0-beta"
+#define APP_VERSION "cuda-0.1.1-beta"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */

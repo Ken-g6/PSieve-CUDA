@@ -21,12 +21,14 @@
 #include "cuda_sleep_memcpy.h"
 
 #define INLINE static inline
+/*
 #ifndef BITSATATIME
 #define BITSATATIME 4
 #endif
-#define BITSMASK ((1<<BITSATATIME)-1)
+#define BITSMASK ((1<<BITSATATIME)-1)*/
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
+/*
 #if(BITSATATIME == 3)
   #define SHIFT_CAST unsigned int
 #elif(BITSATATIME == 4)
@@ -34,6 +36,7 @@
 #else
   #error "Invalid BITSATATIME."
 #endif
+*/
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
 
@@ -53,8 +56,8 @@ __constant__ unsigned int d_mont_nstep;
 __constant__ uint64_t d_r0;
 // Device arrays
 uint64_t *d_P;
-uint64_t *d_K;
-uint64_t *d_bitsskip;
+//uint64_t *d_K;
+//uint64_t *d_bitsskip;
 unsigned char *d_factor_found;
 
 // Timing variables:
@@ -129,7 +132,7 @@ unsigned int cuda_app_init(int gpuno)
       // - P's
       if(cudaMalloc((void**)&d_P, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
         // - K's
-        if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+        //if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
           // - d_factor_found[]
           if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
 #ifndef NDEBUG
@@ -138,8 +141,8 @@ unsigned int cuda_app_init(int gpuno)
 #endif
             break;  // Allocation successful!
           }
-          cudaFree(d_K);
-        }
+          //cudaFree(d_K);
+        //}
         cudaFree(d_P);
       }
       //cudaFree(d_bitsskip);
@@ -169,6 +172,7 @@ unsigned int cuda_app_init(int gpuno)
     exit(1);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
+  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
   ld_r0 = ((uint64_t)1) << (64-(nmin >> (bbits-5)));
 
   bbits = bbits-6;
@@ -363,10 +367,10 @@ __device__ uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
   uint64_t rcx;
 
   // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
-  rcx = 0;
+  //rcx = 0;
   //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx += (rax!=0)?1:0;
+  rcx = (rax!=0)?1:0;
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
   rax = __umul64hi(rax, N);
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
@@ -445,7 +449,6 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   int bbits = d_bbits;
 
   r = d_r0;
-  // If i is small (and it should be at least <= 32), there's a very good chance no mod is needed!
 
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
@@ -538,8 +541,8 @@ void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsig
 }
 
 void cuda_finalize(void) {
-  cudaFree(d_bitsskip);
-  cudaFree(d_K);
+  //cudaFree(d_bitsskip);
+  //cudaFree(d_K);
   cudaFree(d_P);
   cudaFree(d_factor_found);
 }

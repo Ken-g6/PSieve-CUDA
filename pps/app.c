@@ -126,7 +126,7 @@ test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
   uint64_t b = k/2;
 
-  if((k & 1) && n >= nmin) { // k is odd.
+  if((k & 1) && n >= nmin && n < nmax) { // k is odd.
     if (bitmap == NULL) {
       // Check that K*2^N+/-1 is not divisible by 3, 5, or 7, to minimize factors printed.
       // We do 3 and 5 at the same time (15 = 2^4-1), then 7 (=2^3-1).
@@ -676,6 +676,7 @@ inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
   //uint64_t k0 = K;
   // Initialize bitsskip array.
   uint64_t *bs0 = bitsskip[th];
+  unsigned int l_nmax = nmax + ld_nstep;
   int cands_found = 0;
   fillbitskip(bs0, P);
   if(search_proth) k0 = P-k0;
@@ -715,7 +716,7 @@ inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
                 break;*/
     }
     n += nstep;
-  } while (n < nmax);
+  } while (n < l_nmax);
   if(cands_found == 0) {
     fprintf(stderr, "Computation Error: no candidates found for p=%"PRIu64".\n", P);
   }
