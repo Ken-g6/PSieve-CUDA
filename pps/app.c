@@ -671,58 +671,6 @@ void fillbitskip(uint64_t *bitskip, uint64_t p) {
   }
 }
 
-// Old CPU version...
-/*
-inline void h_check_ns(const uint64_t *__attribute__((aligned(16))) P, const uint64_t *__attribute__((aligned(16))) K, int th) {
-  uint64_t *bs0 = bitsskip[th];
-  uint64_t n; // = nmin;
-  int i;
-  for (i = 0; i < cthread_count; i++) {
-    uint64_t k0 = K[i];
-    factor_found[th][i] = 0;
-    if(search_proth) k0 = P[i]-k0;
-    // Initialize bitsskip array.
-    fillbitskip(bs0, P[i]);
-    //if(P[i] == 42070000198537ul) fprintf(stderr, "Checking N's for P=42070000198537\n");
-    n = nmin;
-    do { // Remaining steps are all of equal size nstep
-      //int j;
-      uint64_t kpos;
-      unsigned int mpos;
-      kpos = k0;
-      mpos = __builtin_ctzll(kpos);
-
-      kpos >>= mpos;
-      if (kpos <= kmax)// && kpos >= kmin && mpos < nstep)
-        // Just flag this if kpos <= kmax.
-        factor_found[th][i] = 1;
-        //test_factor(P[i],kpos,n+mpos,+1);
-
-      switch(bpernstep) {
-        case 12:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 11:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 10:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 9: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 8: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 7: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 6: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 5: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 4: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 3: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 2: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-        case 1: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-                break;
- */       /*default:
-                for(j=0; j < bpernstep; j++) {
-                  k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-                }
-                break;*//*
-      }
-      n += nstep;
-    } while (n < nmax);
-  }
-}*/
-
 inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
   uint64_t n; // = nmin;
   //uint64_t k0 = K;
@@ -1102,20 +1050,22 @@ void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint
 {
   unsigned int i;
   // Set up tables on the GPU.
-  setup_ps(P, cthread_count);
+  //setup_ps(P, cthread_count);
   // Initialize all K's from P's.
-  for(i=0; i < cthread_count-APP_BUFLEN; i+=APP_BUFLEN) {
-    init_ks(&P[i], &K[i]);
+  //for(i=0; i < cthread_count-APP_BUFLEN; i+=APP_BUFLEN) {
+    //init_ks(&P[i], &K[i]);
 #ifndef NDEBUG
     //fprintf(stderr, "Inited K's through %d\n", i+APP_BUFLEN-1);
 #endif
-  }
+  //}
   // Do the final ones, possibly duplicating work.
   init_ks(&P[cthread_count-APP_BUFLEN], &K[cthread_count-APP_BUFLEN]);
 
   check_ns(P, K, factor_found[th], cthread_count);
   for(i=0; i < cthread_count; i++) {
     if(factor_found[th][i]) {
+      // Initialize this K.
+      if(i < cthread_count-APP_BUFLEN) init_ks(&P[i&(-2)], &K[i&(-2)]);
       test_one_p(P[i], K[i], th);
     }
   }

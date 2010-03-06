@@ -1,5 +1,6 @@
 appname=ppsieve-cuda
-#DOEMU=-deviceemu
+DOEMU=-deviceemu
+# Test: ./ppsieve-cuda-x86_64-linux -p42070e9 -P42070003e6 -k 1201 -K 9999 -N 2000000 -z normal
 #cleanvars="-fomit-frame-pointer -s"
 #cleanvars="-s"
 if uname -a | grep " 2.6.28[^ ]* [^ a-zA-Z]*Ubuntu" > /dev/null ; then 
@@ -20,8 +21,8 @@ if [ "$kernel" != "" ] ; then export LD_ASSUME_KERNEL=$kernel ; fi
 #gcc -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -march=k8 -mno-3dnow -mtune=core2 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c app.c -lm -lpthread
 # --ptxas-options=-v : Print the number of registers used by each kernel.
 # -deviceemu : compile for the CPU emulator.
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DBITSATATIME=3 -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-24bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-64bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DBITSATATIME=3 -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-24bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-64bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
 nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
 #
