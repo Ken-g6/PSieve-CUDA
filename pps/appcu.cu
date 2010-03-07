@@ -110,7 +110,7 @@ unsigned int cuda_app_init(int gpuno)
   cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
   cthread_count *= gpuprop.multiProcessorCount;
 
-  if(gpuprop.totalGlobalMem < cthread_count*48) {
+  if(gpuprop.totalGlobalMem < cthread_count*5) {
     fprintf(stderr, "Insufficient GPU memory: %u bytes.\n",  (unsigned int)(gpuprop.totalGlobalMem));
     return 0;
   }
@@ -305,28 +305,7 @@ invmod2pow_ul (const uint64_t n)
 
   return r;
 }
-/*
-__device__ uint64_t
-invmod2pow_ul (const uint64_t n)
-{
-  uint64_t r;
 
-  //ASSERT (n % 2UL != 0UL);
-  
-  // Suggestion from PLM: initing the inverse to (3*n) XOR 2 gives the
-  // correct inverse modulo 32, then 3 (for 32 bit) or 4 (for 64 bit) 
-  // Newton iterations are enough.
-  r = (((uint64_t)3) * n) ^ ((uint64_t)2);
-  // Newton iteration
-  r += r - (unsigned int) r * (unsigned int) r * (unsigned int)n;
-  r += r - (unsigned int) r * (unsigned int) r * (unsigned int)n;
-  //if (sizeof (uint64_t) == 8)
-  r += r - (unsigned int) r * (unsigned int) r * (unsigned int)n;
-  r += r - r * r * n;
-
-  return r;
-}
-*/
 __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b, 
              const uint64_t N, const uint64_t Ns)
 {
@@ -398,14 +377,14 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
 }
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
-__device__ uint64_t shiftmod_REDC (const uint64_t a, const unsigned int s, 
+__device__ uint64_t shiftmod_REDC (const uint64_t a, 
              const uint64_t N, const uint64_t Ns)
 {
   uint64_t rax, rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax = a << s;
-  rcx = a >> (64-s);
+  rax = a << d_mont_nstep;
+  rcx = a >> d_nstep;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
   rax *= Ns;
@@ -420,9 +399,9 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a, const unsigned int s,
   rax = (rax>N)?rcx:rax;
 
 #ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<s, N))
+  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
   {
-    fprintf (stderr, "Error, shiftredc(%lu,%u,%lu) = %lu\n", a, s, N, rax);
+    fprintf (stderr, "Error, shiftredc(%lu,%u,%lu) = %lu\n", a, d_mont_nstep, N, rax);
     exit(1);
   }
 #endif
@@ -506,7 +485,7 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
     }
 
     // Proceed to the K for the next N.
-    k0 = shiftmod_REDC(k0, d_mont_nstep, my_P, Ps);
+    k0 = shiftmod_REDC(k0, my_P, Ps);
     n += d_nstep;
   } while (n < d_nmax);
   factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
