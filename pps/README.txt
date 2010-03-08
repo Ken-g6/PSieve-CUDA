@@ -52,3 +52,9 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version."
 
 Source code should be found at http://sites.google.com/site/kenscode/
+
+How it works (with apologies to John M. Pollard):
+Power N, mulmod from there,
+Hopping through Proth numbers' lair.
+Look for factors in between
+The Reynolds-Brazier sieve can glean!

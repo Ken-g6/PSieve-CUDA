@@ -1,4 +1,5 @@
 # pps files to ignore:
+license.txt
 # - Results file:
 ppfactors.txt
 
