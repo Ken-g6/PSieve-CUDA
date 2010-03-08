@@ -108,6 +108,7 @@ unsigned int cuda_app_init(int gpuno)
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
   cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
+  if(gpuprop.major == 2) cthread_count = 1024;
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*5) {
@@ -377,17 +378,19 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
 }
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+// rax is passed in as a * Ns.
+// rax's original value is destroyed, just to keep the register count down.
 __device__ uint64_t shiftmod_REDC (const uint64_t a, 
-             const uint64_t N, const uint64_t Ns)
+             const uint64_t N, uint64_t &rax)
 {
-  uint64_t rax, rcx;
+  uint64_t rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax = a << d_mont_nstep;
+  rax <<= d_mont_nstep;
   rcx = a >> d_nstep;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
-  rax *= Ns;
+  //rax *= Ns;
   //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
   rcx += (rax!=0)?1:0;
@@ -454,7 +457,7 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
   unsigned int n = d_nmin; // = nmin;
   unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0;
+  uint64_t k0, kPs;
   uint64_t kpos;
   unsigned char my_factor_found = 0;
   uint64_t my_P, Ps;
@@ -472,8 +475,17 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
-    kpos = mod_REDC(k0, my_P, Ps);
-    i = __ffsll(kpos)-1;
+    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    kPs = k0 * Ps;
+    kpos = onemod_REDC(my_P, kPs);
+    //i = __ffsll(kpos)-1;
+    i = (unsigned int)kpos;
+    if(i != 0) {
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
+    } else {
+      i = (unsigned int)(kpos>>32);
+      i=63 - __clz (i & -i);
+    }
 
     kpos >>= i;
     if (kpos <= d_kmax) {
@@ -485,7 +497,8 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
     }
 
     // Proceed to the K for the next N.
-    k0 = shiftmod_REDC(k0, my_P, Ps);
+    // kPs is destroyed, just to keep the register count down.
+    k0 = shiftmod_REDC(k0, my_P, kPs);
     n += d_nstep;
   } while (n < d_nmax);
   factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;

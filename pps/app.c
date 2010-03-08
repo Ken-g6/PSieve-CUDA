@@ -579,7 +579,7 @@ void app_init(void)
 
   nstart = nmin;
 
-  printf("nstart=%u, nstep=%u\n",nstart,nstep);
+  printf("nstart=%u, nstep=%u, gpu_nstep=%u\n",nstart,nstep,ld_nstep);
 
   // Allocate and fill bitmap.
   if (input_filename != NULL)
