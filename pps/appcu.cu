@@ -505,9 +505,8 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
 }
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
-void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsigned int cthread_count) {
+void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   // timing variables:
-  static __thread int check_ns_delay = 0;
   cudaError_t res;
   // Pass P.
   res = cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
@@ -525,8 +524,12 @@ void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsig
 #ifndef NDEBUG
   fprintf(stderr, "Main kernel successful...\n");
 #endif
+}
+
+void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t) {
+  static __thread int check_ns_delay = 0;
   // Get d_factor_found, into the thread'th factor_found array.
-  cudaSleepMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &check_ns_delay, check_ns_overlap);
+  cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &check_ns_delay, check_ns_overlap, start_t);
 #ifndef NDEBUG
   fprintf(stderr, "Retrieve successful...\n");
 #endif

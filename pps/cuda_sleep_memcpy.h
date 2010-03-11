@@ -11,5 +11,5 @@
 #define CUDA_SLEEP_MEMCPY_H 1
 
 cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap);
-
+cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap, const uint64_t start_t);
 #endif

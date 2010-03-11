@@ -84,6 +84,7 @@ static int use_sse2 = 2;*/
 unsigned int search_proth = 1;  // Search for Proth or Riesel numbers?
 static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 static unsigned int bitsmask, bpernstep;
+static uint64_t* gpu_start_times;
 static uint64_t** bitsskip;
 static unsigned char** factor_found;
 
@@ -613,6 +614,10 @@ void app_init(void)
   bitsmask--; // Finalize bitsmask.
 
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
+  gpu_start_times = xmalloc(num_threads*sizeof(uint64_t));
+  for(i=0; i < num_threads; i++) {
+    gpu_start_times[i] = (uint64_t)0;
+  }
 
 #ifdef _WIN32
   InitializeCriticalSection(&factors_mutex);
@@ -630,13 +635,19 @@ void app_init(void)
  */
 unsigned int app_thread_init(int th)
 {
+  unsigned int i;
   uint16_t mode;
   unsigned int cthread_count;
 
   cthread_count = cuda_app_init(th);
 
   // Allocate the factor_found arrays.
-  if(cthread_count > 0) factor_found[th] = xmalloc(cthread_count*sizeof(unsigned char));
+  if(cthread_count > 0) {
+    factor_found[th] = xmalloc(cthread_count*sizeof(unsigned char));
+    for(i=0; i < cthread_count; i++) {
+      factor_found[th][i] = 0;
+    }
+  }
 
   /* Set FPU to use extended precision and round to zero. This has to be
      done here rather than in app_init() because _beginthreadex() doesn't
@@ -1042,34 +1053,58 @@ void init_ks(const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribu
   for (i = 0; i < 6; i++)
     asm volatile ("fstp %st(0)");
 #endif
+  //fprintf(stderr, "K setup successful.\n");
+}
+
+void check_factors_found(const int th, const uint64_t *__attribute__((aligned(16))) P, const unsigned int cthread_count) {
+  unsigned int i;
+  uint64_t K[APP_BUFLEN];
+  //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
+  // Check the previous results.
+  for(i=0; i < cthread_count; i++) {
+    if(factor_found[th][i]) {
+      // Initialize this K.
+      if(i >= cthread_count-APP_BUFLEN) {
+        init_ks(&P[cthread_count-APP_BUFLEN], K);
+        test_one_p(P[i], K[i+APP_BUFLEN-cthread_count], th);
+      } else {
+        init_ks(&P[i&(-2)], K);
+        test_one_p(P[i], K[i&1], th);
+      }
+    }
+  }
+
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
    P is an array of APP_BUFLEN candidate primes.
 */
-void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K, unsigned int cthread_count)
+void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) lastP, const unsigned int cthread_count)
 {
   unsigned int i;
-  // Set up tables on the GPU.
-  //setup_ps(P, cthread_count);
-  // Initialize all K's from P's.
-  //for(i=0; i < cthread_count-APP_BUFLEN; i+=APP_BUFLEN) {
-    //init_ks(&P[i], &K[i]);
-#ifndef NDEBUG
-    //fprintf(stderr, "Inited K's through %d\n", i+APP_BUFLEN-1);
-#endif
-  //}
-  // Do the final ones, possibly duplicating work.
-  init_ks(&P[cthread_count-APP_BUFLEN], &K[cthread_count-APP_BUFLEN]);
+  uint64_t new_start_time;
 
-  check_ns(P, K, factor_found[th], cthread_count);
-  for(i=0; i < cthread_count; i++) {
-    if(factor_found[th][i]) {
-      // Initialize this K.
-      if(i < cthread_count-APP_BUFLEN) init_ks(&P[i&(-2)], &K[i&(-2)]);
-      test_one_p(P[i], K[i], th);
-    }
+  // If there was a kernel running, get its results first.
+  if(gpu_start_times[th] != 0) {
+    //printf("Getting factors from iteration at %d\n", gpu_start_times[th]);
+    get_factors_found(factor_found[th], cthread_count, gpu_start_times[th]);
   }
+
+  // Start the next kernel.
+  check_ns(P, cthread_count);
+  new_start_time = elapsed_usec();
+  //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
+
+  if(gpu_start_times[th] != 0) {
+    check_factors_found(th, lastP, cthread_count);
+    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_start_times[th], lastP[0]);
+  }
+
+  // Copy the new P's over the old.
+  for(i=0; i < cthread_count; i++) {
+    lastP[i] = P[i];
+  }
+  gpu_start_times[th] = new_start_time;
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
@@ -1077,7 +1112,7 @@ void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint
    The application should be prepared to checkpoint after returning from
    this function.
 */
-void app_thread_fun1(int th, uint64_t *P, uint64_t *K, unsigned int cthread_count, unsigned int len)
+void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int cthread_count, unsigned int len)
 {
   unsigned int i;
 
@@ -1092,7 +1127,15 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *K, unsigned int cthread_coun
         P[i] = P[i-1];
     }
 
-    app_thread_fun(th,P,K, cthread_count);
+    app_thread_fun(th,P,lastP, cthread_count);
+  }
+  // Finish the last kernel.
+  if(gpu_start_times[th] != 0) {
+    //printf("Getting factors from iteration at %d\n", gpu_start_times[th]);
+    get_factors_found(factor_found[th], cthread_count, gpu_start_times[th]);
+    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_start_times[th], lastP[0]);
+    check_factors_found(th, lastP, cthread_count);
+    gpu_start_times[th] = (uint64_t)0;
   }
 }
 
@@ -1101,6 +1144,7 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *K, unsigned int cthread_coun
 */
 void app_thread_fini(int th)
 {
+  cuda_finalize();
 }
 
 /* This function is called at most once, after app_init() but before any
@@ -1148,8 +1192,6 @@ void app_fini(void)
   fclose(factors_file);
   printf("Found %u factor%s\n",factor_count,(factor_count==1)? "":"s");
 
-  cuda_finalize();
-
 #ifdef _WIN32
   DeleteCriticalSection(&factors_mutex);
 #else
@@ -1167,4 +1209,8 @@ void app_fini(void)
     free(bitsskip[i]);
   }
   free(bitsskip);
+  for(i=0; i < num_threads; i++) {
+    free(factor_found[i]);
+  }
+  free(factor_found);
 }

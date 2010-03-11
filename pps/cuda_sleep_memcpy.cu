@@ -58,3 +58,52 @@ cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaM
 	return ret;
 }
 
+// Allows one to perform a CUDA memcpy without (as much) busy-wait.
+// This version expects elapsed_usec() to be called immediately
+// after the kernel call; then passed in here later.
+// For best performance, the CUDA kernel should take a consistent
+// amounts of time, but the CPU time doesn't matter.
+//
+// * Delay is time to sleep in usec, passed by reference.
+//   It is dynamically adjusted by the function.
+//
+// * Overlap is time that CUDA should busy-wait, in usec.
+//   Larger overlaps recover from extra-long kernel calls more quickly,
+//   but they use more CPU all other times.
+cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap, const uint64_t start_t) {
+	cudaError_t ret;
+#ifndef BUSYWAIT
+	// Timer variables.
+	int busy_wait_t;
+
+	// First, sleep as long as seemed a good idea last time.
+#ifndef NDEBUG
+	fprintf(stderr, "Sleeping %d usec.\n", *delay);
+#endif
+	// Figure out how much time is left before a result is expected.
+	if(*delay > 0) {
+		busy_wait_t = *delay - (int)(elapsed_usec()-start_t);
+		// Sleep that long.
+		usleep(busy_wait_t);
+	}
+
+	// Now, time the busy-wait.
+#endif
+	ret = cudaMemcpy(dst, src, count, kind);
+#ifndef BUSYWAIT
+	// Set that to the delay.
+	*delay = elapsed_usec()-start_t;
+
+	// Subtract the expected overlap.
+	*delay -= overlap;
+
+	// Can't sleep less than 0 seconds.
+	if(*delay < 0) *delay = 0;
+
+#ifndef NDEBUG
+	fprintf(stderr, "Will sleep %d usec next time.\n", *delay);
+#endif
+#endif
+	return ret;
+}
+
