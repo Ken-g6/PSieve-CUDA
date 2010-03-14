@@ -40,11 +40,21 @@
 #define REPORT_OPT_DEFAULT 60  /* seconds between status reports */
 #define CHECKPOINT_OPT_DEFAULT 300  /* seconds between checkpoints */
 
+/* BOINC-compatible functions */
+#ifdef __cplusplus
+extern "C" {
+#endif
+FILE* bfopen(const char *filename, const char *mode);
+void bmsg(const char *msg);
+char* bmprefix();
+void bexit(int status);
+#ifdef __cplusplus
+}
+#endif
 
 extern unsigned int num_threads; /* Excluding parent thread */
 extern uint64_t pmin, pmax;
 extern unsigned int quiet_opt;
-extern unsigned int cthread_count;
 
 
 #endif /* _MAIN_H */

@@ -39,10 +39,30 @@
 #include "main.h"
 #include "clock.h"
 #include "sieve.h"
-#include "util.h"
+#include "putil.h"
 
 #include "app.h"
 #include "appcu.h"
+#ifdef USE_BOINC
+#ifdef _WIN32                //  Stuff we only need on Windows: 
+#include "boinc_win.h"
+#include "util.h"            // parse_command_line(), boinc_sleep()
+#include "str_util.h"        // for parse_command_line()
+#endif
+#ifdef MSVC
+#define getThreadPriority() GetThreadPriority(GetCurrentThread())
+#define setThreadPriority(num) SetThreadPriority(GetCurrentThread(), num)
+#else
+#define getThreadPriority() getpriority(PRIO_PROCESS, 0)
+#define setThreadPriority(num) nice(num)
+#endif
+
+/* BOINC API */
+
+#include "boinc_api.h"
+#include "diagnostics.h"     // boinc_init_diagnostics()
+#include "filesys.h"         // boinc_fopen(), etc...
+#endif
 
 /* Global variables
  */
@@ -160,15 +180,86 @@ static void fini_signals(void)
 #endif
 }
 
+void boincordie(int res, char *message) {
+  if(res) {
+    fprintf(stderr, "%s", message);
+    exit(EXIT_FAILURE);
+  }
+}
+
+#ifdef USE_BOINC
+FILE* bfopen(const char *filename, const char *mode) {
+  char resolved_name[512];
+  if(boinc_resolve_filename(filename, resolved_name, 512)) return NULL;
+  return boinc_fopen(resolved_name, mode);
+}
+void bmsg(const char *msg) {
+  //fprintf(stderr, "%s %s", boinc_msg_prefix(), msg);
+  fprintf(stderr, "%s", msg);
+}
+char* bmprefix() {
+  //return boinc_msg_prefix();
+  return "";
+}
+/*
+ *  Dummy graphics API entry points.  This app does not do graphics, 
+ *  but it still must provide these empty callbacks, for BOINC 5.  
+ */
+#if BOINC_MAJOR_VERSION < 6
+void app_graphics_init() {}
+void app_graphics_resize(int width, int height){}
+void app_graphics_render(int xs, int ys, double time_of_day) {}
+void app_graphics_reread_prefs() {}
+void boinc_app_mouse_move(int x, int y, int left, int middle, int right ){}
+void boinc_app_mouse_button(int x, int y, int which, int is_down){}
+void boinc_app_key_press(int x, int y){}
+void boinc_app_key_release(int x, int y){}
+#endif
+
+#else
+FILE* bfopen(const char *filename, const char *mode) {
+  return fopen(filename, mode);
+}
+void bmsg(const char *msg) {
+  fprintf(stderr, "%s", msg);
+}
+char* bmprefix() {
+  return "";
+}
+int boinc_init() {
+  fprintf(stderr, "%sStarting non-BOINC version of PPSieve", bmprefix());
+  return 0;
+}
+void boinc_finish(int status) {
+  exit(status);
+}
+int boinc_time_to_checkpoint() {
+  return 1;
+}
+void boinc_checkpoint_completed() {
+}
+#endif
+void bexit(int status) {
+  boinc_finish(status);
+}
+
 #define STRFTIME_FORMAT "ETA %d %b %H:%M"
 static void report_status(uint64_t now, uint64_t processor_time,
                           uint64_t cycles, uint64_t progress)
 {
-  double rate, cpus, freq, done, done_eta;
+  double done;
+#ifndef USE_BOINC
+  double rate, cpus, freq, done_eta;
   const char *unit;
   int prec;
   char buf[32];
+#endif
 
+  done = (double)(progress-pmin)/(pmax-pmin);
+#ifdef USE_BOINC
+  boinc_fraction_done(done);
+//#endif
+#else
   rate = (double)(progress-last_report_progress)/(now-last_report_time);
   unit = "M";
 
@@ -191,7 +282,6 @@ static void report_status(uint64_t now, uint64_t processor_time,
 
   freq = (double)(cycles-last_report_processor_cycles)/(now-last_report_time);
 
-  done = (double)(progress-pmin)/(pmax-pmin);
   done_eta = (double)(progress-pstart)/(pmax-pstart);
 
   // Calculate ETA.
@@ -209,6 +299,7 @@ static void report_status(uint64_t now, uint64_t processor_time,
     putchar('\r');
     fflush(stdout);
   } else putchar('\n');
+#endif
 }
 
 static void write_checkpoint(uint64_t p)
@@ -268,21 +359,21 @@ static uint64_t read_checkpoint(void)
 
   if (valid && p0 + p + count + sum == checksum)
   {
-    fprintf(stderr,"Resuming from checkpoint p=%"PRIu64" in %s\n",
-            p, cpf);
+    fprintf(stderr,"%sResuming from checkpoint p=%"PRIu64" in %s\n",
+            bmprefix(), p, cpf);
     cand_count = count;
     cand_sum = sum;
     return p;
   }
   else
   {
-    fprintf(stderr,"Ignoring invalid checkpoint in %s\n", cpf);
+    fprintf(stderr,"%sIgnoring invalid checkpoint in %s\n", bmprefix(), cpf);
     return pmin;
   }
 }
 
 
-static const char *short_opts = "p:P:Q:B:C:c:r:t:z:h" APP_SHORT_OPTS;
+static const char *short_opts = "p:P:Q:B:C:c:r:t:z:d:qh" APP_SHORT_OPTS;
 
 static const struct option long_opts[] = {
   {"pmin",        required_argument, 0, 'p'},
@@ -293,8 +384,9 @@ static const struct option long_opts[] = {
   {"blocks",      required_argument, 0, 256},
   {"checkpoint",  required_argument, 0, 'c'},
   {"report",      required_argument, 0, 'r'},
-  {"threads",     required_argument, 0, 't'},
+  {"nthreads",    required_argument, 0, 't'},
   {"priority",    required_argument, 0, 'z'},
+  {"device",      required_argument, 0, 'd'},
   {"help",        no_argument,       0, 'h'},
   {"quiet",       no_argument,       0, 'q'},
   APP_LONG_OPTS
@@ -313,10 +405,12 @@ static void help(void)
          BLOCKS_OPT_DEFAULT);
   printf("-c --checkpoint=N  Checkpoint every N seconds (default N=%d)\n",
          CHECKPOINT_OPT_DEFAULT);
+  printf("-d --device=N      Use GPU N\n",
+         CHECKPOINT_OPT_DEFAULT);
   printf("-q --quiet         Don't print factors to screen\n");
   printf("-r --report=N      Report status every N seconds (default N=%d)\n",
          REPORT_OPT_DEFAULT);
-  printf("-t --threads=N     Start N child threads (default N=1)\n");
+  printf("-t --nthreads=N    Start N threads on N GPUs (default N=1)\n");
   printf("-z --priority=N    Set process priority to nice N or {idle,low,normal}\n");
   printf("-h --help          Print this help\n");
 }
@@ -419,25 +513,25 @@ static int process_args(int argc, char *argv[])
       case -1:
         /* If ind is unchanged then this is a short option, otherwise long. */
         if (ind == -1)
-          fprintf(stderr,"%s: invalid argument -%c %s\n",
+          fprintf(stderr,"%s%s: invalid argument -%c %s\n", bmprefix(),
                   argv[0],opt,optarg);
         else
-          fprintf(stderr,"%s: invalid argument --%s %s\n",
+          fprintf(stderr,"%s%s: invalid argument --%s %s\n", bmprefix(),
                   argv[0],long_opts[ind].name,optarg);
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
 
       case -2:
         /* If ind is unchanged then this is a short option, otherwise long. */
         if (ind == -1)
-          fprintf(stderr,"%s: out of range argument -%c %s\n",
+          fprintf(stderr,"%s%s: out of range argument -%c %s\n", bmprefix(),
                   argv[0],opt,optarg);
         else
-          fprintf(stderr,"%s: out of range argument --%s %s\n",
+          fprintf(stderr,"%s%s: out of range argument --%s %s\n", bmprefix(),
                   argv[0],long_opts[ind].name,optarg);
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
 
       default:
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
     }
 
   while (optind < argc)
@@ -449,24 +543,24 @@ static int process_args(int argc, char *argv[])
         break;
 
       case -1:
-        fprintf(stderr,"%s: invalid non-option argument %s\n",
+        fprintf(stderr,"%s%s: invalid non-option argument %s\n", bmprefix(),
                   argv[0],argv[optind]);
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
 
       case -2:
-        fprintf(stderr,"%s: out of range non-option argument %s\n",
+        fprintf(stderr,"%s%s: out of range non-option argument %s\n", bmprefix(),
                   argv[0],argv[optind]);
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
 
       default:
-        exit(EXIT_FAILURE);
+        boinc_finish(EXIT_FAILURE);
     }
 
   if (help_opt)
   {
     help();
     app_help();
-    exit(EXIT_SUCCESS);
+    boinc_finish(EXIT_SUCCESS);
   }
 
   return count;
@@ -486,7 +580,7 @@ static int read_config_file(const char *fn)
 
   assert(fn != NULL);
 
-  if ((file = fopen(fn,"r")) == NULL)
+  if ((file = bfopen(fn,"r")) == NULL)
     return 0;
 
   for (count = 0; fgets(line,sizeof(line),file) != NULL; )
@@ -504,19 +598,19 @@ static int read_config_file(const char *fn)
 
     if (long_opts[ind].name == NULL)
     {
-      fprintf(stderr,"%s: unrecognised option `%s'\n",fn,str);
-      exit(EXIT_FAILURE);
+      fprintf(stderr,"%s%s: unrecognised option `%s'\n", bmprefix(),fn,str);
+      boinc_finish(EXIT_FAILURE);
     }
 
     if (long_opts[ind].has_arg == no_argument && arg != NULL)
     {
-      fprintf(stderr,"%s: option `%s' doesn't allow an argument\n",fn,str);
-      exit(EXIT_FAILURE);
+      fprintf(stderr,"%s%s: option `%s' doesn't allow an argument\n", bmprefix(),fn,str);
+      boinc_finish(EXIT_FAILURE);
     }
     else if (long_opts[ind].has_arg == required_argument && arg == NULL)
     {
-      fprintf(stderr,"%s: option `%s' requires an argument\n",fn,str);
-      exit(EXIT_FAILURE);
+      fprintf(stderr,"%s%s: option `%s' requires an argument\n", bmprefix(),fn,str);
+      boinc_finish(EXIT_FAILURE);
     }
 
     if (long_opts[ind].flag != NULL)
@@ -529,15 +623,16 @@ static int read_config_file(const char *fn)
         break;
 
       case -1:
-        fprintf(stderr,"%s: invalid argument %s %s\n",fn,str,arg);
-        exit(EXIT_FAILURE);
+        fprintf(stderr,"%s%s: invalid argument %s %s\n", bmprefix(),fn,str,arg);
+        boinc_finish(EXIT_FAILURE);
 
       case -2:
-        fprintf(stderr,"%s: out of range argument %s %s\n",fn,str,arg);
-        exit(EXIT_FAILURE);
+        fprintf(stderr,"%s%s: out of range argument %s %s\n", bmprefix(),fn,str,arg);
+        boinc_finish(EXIT_FAILURE);
 
       default:
-        exit(EXIT_FAILURE);
+        fprintf(stderr,"%s%s: weird argument %s %s\n", bmprefix(),fn,str,arg);
+        boinc_finish(EXIT_FAILURE);
     }
 
     count++;
@@ -559,7 +654,7 @@ static void thread_cleanup(void *arg)
   int th = (int)((long)arg);
 
 #ifndef NDEBUG
-  fprintf(stderr,"thread_cleanup: %d\n",th);
+  fprintf(stderr,"%sthread_cleanup: %d\n",bmprefix(),th);
 #endif
 
   pthread_mutex_lock(&exiting_mutex);
@@ -573,7 +668,6 @@ static void *thread_fun(void *arg)
 {
   int th = (int)((long)arg);
   uint64_t p0 = 0, p, count = 0, sum = 0;
-  //uint64_t P[APP_BUFLEN] __attribute__ ((aligned(16)));
   uint64_t *P, *K, *P0, *K0;
   unsigned char *P1;
   unsigned int plen, len;
@@ -598,6 +692,7 @@ static void *thread_fun(void *arg)
   pthread_cleanup_push(thread_cleanup,arg);
 #endif
 
+  fprintf(stderr,"%sThread %d starting\n", bmprefix(),th);
 
   plen = 0;
   len = sv->chunk_size;
@@ -652,11 +747,6 @@ static void *thread_fun(void *arg)
             app_thread_fun(th,P,K,cthread_count);
             plen = 0;
           }
-#ifndef NDEBUG
-          //else {
-          //fprintf(stderr, "Only %d P's so far; waiting for %d\n", plen, cthread_count);
-          //}
-#endif
         }
       }
 
@@ -693,9 +783,10 @@ static void *thread_fun(void *arg)
     app_thread_fini(th);
 
     if (p0 >= pmax)
-      fprintf(stderr,"\nThread %d completed",th);
+      fprintf(stderr,"\n%sThread %d completed", bmprefix(),th);
     else
-      fprintf(stderr,"\nThread %d interrupted",th);
+    fprintf(stderr,"\n%sThread %d interrupted", bmprefix(),th);
+
     /* Just in case a checkpoint is signalled before other threads exit */
     no_more_checkpoints = 1;
   }
@@ -750,11 +841,24 @@ int main(int argc, char *argv[])
   uint64_t pstop;
   int th, process_ret = EXIT_SUCCESS;
 
+#ifdef USE_BOINC
+  boinc_init_diagnostics(BOINC_DIAG_REDIRECTSTDERR|
+      BOINC_DIAG_MEMORYLEAKCHECKENABLED|
+      BOINC_DIAG_DUMPCALLSTACKENABLED| 
+      BOINC_DIAG_TRACETOSTDERR);
+
+  boincordie(boinc_init_parallel(), "BOINC initialization failed!\n");
+#endif
   program_start_time = elapsed_usec();
   app_banner();
 
   read_config_file(CONFIG_FILENAME);
   process_args(argc,argv);
+#ifdef USE_BOINC
+  // Get the priority.
+  priority_opt = getThreadPriority();
+  //printf("Got priority %d.\n", priority_opt);
+#endif
 
   if (pmin < PMIN_MIN)
     pmin = PMIN_MIN;
@@ -764,13 +868,13 @@ int main(int argc, char *argv[])
   {
     if (pmax == 0 && pmin < PMAX_MAX-1000000000)
     {
-      fprintf(stderr,"pmax not specified, using default pmax = pmin + 1e9\n");
+      fprintf(stderr,"%spmax not specified, using default pmax = pmin + 1e9\n", bmprefix());
       pmax = pmin + 1000000000; /* Default range */
     }
     else
     {
-      fprintf(stderr, "Option out of range: pmax must be greater than pmin\n");
-      exit(EXIT_FAILURE);
+      fprintf(stderr, "%sOption out of range: pmax must be greater than pmin\n", bmprefix());
+      boinc_finish(EXIT_FAILURE);
     }
   }
   if(pmin_str == NULL) pmin_str = empty_string;
@@ -809,7 +913,7 @@ int main(int argc, char *argv[])
 
   app_init();
 
-  fprintf(stderr,"Sieve started: %"PRIu64" <= p < %"PRIu64"\n",pmin,pmax);
+  fprintf(stderr,"%sSieve started: %"PRIu64" <= p < %"PRIu64"\n", bmprefix(),pmin,pmax);
 
   pstart = read_checkpoint();
   pstart |= 1; /* Must be odd! */
@@ -833,14 +937,13 @@ int main(int argc, char *argv[])
   sieve_start_processor_time = processor_usec();
 
   /* Start child threads */
-  fprintf(stderr,"Starting %u threads.\n", num_threads);
 #ifdef _WIN32
   for (th = 0; th < num_threads; th++)
     if ((tid[th] = (HANDLE)
          _beginthreadex(NULL,0,thread_fun_wrapper,(void *)th,0,NULL)) == 0)
     {
       perror("_beginthreadex");
-      exit(EXIT_FAILURE);
+      boinc_finish(EXIT_FAILURE);
     }
 #else
   pthread_mutex_lock(&exiting_mutex);
@@ -850,13 +953,8 @@ int main(int argc, char *argv[])
     if (pthread_create(&tid[thl],NULL,thread_fun,(void *)thl) != 0)
     {
       perror("pthread_create");
-      exit(EXIT_FAILURE);
+      boinc_finish(EXIT_FAILURE);
     }
-#ifndef NDEBUG
-    else {
-      fprintf(stderr, "Created thread %ld\n", thl);
-    }
-#endif
   }
 #endif
 
@@ -905,8 +1003,11 @@ int main(int argc, char *argv[])
           sem_wait(&checkpoint_semaphoreA);
 #endif
         progress = next_chunk(sv);
-        write_checkpoint(progress);
-        last_checkpoint_progress = progress;
+        if(boinc_time_to_checkpoint()) {
+          write_checkpoint(progress);
+          last_checkpoint_progress = progress;
+          boinc_checkpoint_completed();
+        }
         last_checkpoint_time = current_time;
         next_checkpoint_time = current_time + checkpoint_period;
         checkpointing = 0;
@@ -957,7 +1058,7 @@ int main(int argc, char *argv[])
   /* Restore signal handlers in case some thread fails to join below. */
   fini_signals();
 
-  fprintf(stderr,"\nWaiting for threads to exit");
+  fprintf(stderr,"\n%sWaiting for threads to exit", bmprefix());
 
 #ifdef _WIN32
   /* Wait for all threads, then examine return values and close. */
@@ -966,7 +1067,7 @@ int main(int argc, char *argv[])
   {
     if (GetExitCodeThread(tid[th],&thread_ret) && thread_ret != 0)
     {
-      fprintf(stderr,"Thread %d failed: %lX\n",th,thread_ret);
+      fprintf(stderr,"%sThread %d failed: %lX\n", bmprefix(),th,thread_ret);
       process_ret = EXIT_FAILURE;
     }
     CloseHandle(tid[th]);
@@ -984,7 +1085,7 @@ int main(int argc, char *argv[])
       if (thread_ret != 0)
       {
         /* This thread exited with an error, so stop the others too */
-        fprintf(stderr,"Thread %d failed: %p\n",th,thread_ret);
+        fprintf(stderr,"%sThread %d failed: %p\n", bmprefix(),th,thread_ret);
         process_ret = EXIT_FAILURE;
         stopping = 1;
       }
@@ -1002,7 +1103,7 @@ int main(int argc, char *argv[])
       pthread_join(tid[th],&thread_ret);
       if (thread_ret != 0)
       {
-        fprintf(stderr,"Thread %d failed: %p\n",th,thread_ret);
+        fprintf(stderr,"%sThread %d failed: %p\n", bmprefix(),th,thread_ret);
         process_ret = EXIT_FAILURE;
       }
     }
@@ -1031,12 +1132,12 @@ int main(int argc, char *argv[])
 
   if (pstop >= pmax)
   {
-    fprintf(stderr,"\nSieve complete: %"PRIu64" <= p < %"PRIu64"\n",pmin,pmax);
+    fprintf(stderr,"\n%sSieve complete: %"PRIu64" <= p < %"PRIu64"\n", bmprefix(),pmin,pmax);
     remove(checkpoint_filename);
   }
   else
   {
-   fprintf(stderr,"\nSieve incomplete: %"PRIu64" <= p < %"PRIu64"\n",pmin,pstop);
+   fprintf(stderr,"\n%sSieve incomplete: %"PRIu64" <= p < %"PRIu64"\n", bmprefix(),pmin,pstop);
   }
 
   app_fini();
@@ -1052,29 +1153,31 @@ int main(int argc, char *argv[])
       cand_count += thread_data[th].count;
       cand_sum += thread_data[th].sum;
     }
-    fprintf(stderr,"count=%"PRIu64",sum=0x%016"PRIx64"\n",cand_count,cand_sum);
+    fprintf(stderr,"%scount=%"PRIu64",sum=0x%016"PRIx64"\n", bmprefix(),cand_count,cand_sum);
   }
 
   /* Print statistics for this run */
   uint64_t stop_time = elapsed_usec();
   uint64_t stop_processor_time = processor_usec();
-  fprintf(stderr,"Elapsed time: %.2f sec. (%.2f init + %.2f sieve)"
-          " at %.0f p/sec.\n",
+  fprintf(stderr,"%sElapsed time: %.2f sec. (%.2f init + %.2f sieve)"
+          " at %.0f p/sec.\n", bmprefix(),
           (stop_time-program_start_time)/1000000.0,
           (sieve_start_time-program_start_time)/1000000.0,
           (stop_time-sieve_start_time)/1000000.0,
           (double)(pstop-pstart)/(stop_time-sieve_start_time)*1000000);
-  fprintf(stderr,"Processor time: %.2f sec. (%.2f init + %.2f sieve)"
-          " at %.0f p/sec.\n",
+  fprintf(stderr,"%sProcessor time: %.2f sec. (%.2f init + %.2f sieve)"
+          " at %.0f p/sec.\n", bmprefix(),
           (stop_processor_time)/1000000.0,
           (sieve_start_processor_time)/1000000.0,
           (stop_processor_time-sieve_start_processor_time)/1000000.0,
           (double)(pstop-pstart)/(stop_processor_time-sieve_start_processor_time)*1000000);
-  fprintf(stderr,"Average processor utilization: %.2f (init), %.2f (sieve)\n",
+  fprintf(stderr,"%sAverage processor utilization: %.2f (init), %.2f (sieve)\n",
+          bmprefix(),
           (double)(sieve_start_processor_time)
           /(sieve_start_time-program_start_time),
           (double)(stop_processor_time-sieve_start_processor_time)
           /(stop_time-sieve_start_time));
 
+  boinc_finish(process_ret);
   return process_ret;
 }

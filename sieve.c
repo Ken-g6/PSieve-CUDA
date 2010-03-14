@@ -18,7 +18,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
-#include "util.h"
+#include "putil.h"
 #include "sieve.h"
 
 

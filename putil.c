@@ -13,8 +13,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include "util.h"
+#include "putil.h"
 
+#ifdef USE_BOINC
+#include "boinc_api.h"
+#endif
 
 void *xmalloc(size_t size)
 {
@@ -23,7 +26,11 @@ void *xmalloc(size_t size)
   if ((ret = malloc(size)) == NULL)
   {
     perror("malloc");
+#ifdef USE_BOINC
+    boinc_finish(EXIT_FAILURE);
+#else
     exit(EXIT_FAILURE);
+#endif
   }
 
   return ret;
@@ -36,7 +43,11 @@ void *xrealloc(void *mem, size_t size)
   if ((ret = realloc(mem,size)) == NULL)
   {
     perror("realloc");
+#ifdef USE_BOINC
+    boinc_finish(EXIT_FAILURE);
+#else
     exit(EXIT_FAILURE);
+#endif
   }
 
   return ret;

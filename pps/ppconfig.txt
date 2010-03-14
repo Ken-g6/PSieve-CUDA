@@ -10,7 +10,8 @@ checkpoint=300
 report=60
 
 # Process priority: idle,low,normal,none, or a number 0 (normal) to 19 (idle).
-priority=normal
+# Default is normal (0).
+#priority=normal
 
 # Sieve block size, in bytes. Should not exceed L2 cache size.
 blocksize=512k

@@ -15,7 +15,7 @@
 #include <inttypes.h>
 #include <assert.h>
 #include "main.h"
-#include "util.h"
+#include "putil.h"
 #include "app.h"
 #include "appcu.h"
 #include "cuda_sleep_memcpy.h"
@@ -91,19 +91,19 @@ unsigned int cuda_app_init(int gpuno)
 
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
-    fprintf(stderr, "GPU %d not compute-capable.\n", gpuno);
+    fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
     return 0;
   }
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
-    fprintf(stderr, "Error: PMin is too small, <= 2^32!\n");
-    exit(1);
+    bmsg("Error: PMin is too small, <= 2^32!\n");
+    bexit(1);
   }
   cudaSetDevice(gpuno);
-  fprintf(stderr, "Detected GPU %d: %s\n", gpuno, gpuprop.name);
-  fprintf(stderr, "Detected compute capability: %d.%d\n", gpuprop.major, gpuprop.minor);
-  fprintf(stderr, "Detected %d multiprocessors.\n", gpuprop.multiProcessorCount);
-  //fprintf(stderr, "Detected %lu bytes of device memory.\n", gpuprop.totalGlobalMem);
+  fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop.name);
+  fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop.major, gpuprop.minor);
+  fprintf(stderr, "%sDetected %d multiprocessors.\n", bmprefix(), gpuprop.multiProcessorCount);
+  //fprintf(stderr, "%sDetected %lu bytes of device memory.\n", bmprefix(), gpuprop.totalGlobalMem);
 
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
@@ -112,15 +112,12 @@ unsigned int cuda_app_init(int gpuno)
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*5) {
-    fprintf(stderr, "Insufficient GPU memory: %u bytes.\n",  (unsigned int)(gpuprop.totalGlobalMem));
+    fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
     return 0;
   }
   // Calculate ld_bitsatatime given memory constraints, and possibly nmin-nmax via nstep vs. 2^ld_bitsatatime
   // Things change if nmax-nmin < 1000000 or so, but for now let's go with a constant maximum of ld_bitsatatime<=13.
   i = gpuprop.totalGlobalMem/sizeof(uint64_t); // Total number of 64-bit numbers that can be stored.
-#ifndef NDEBUG
-  fprintf(stderr, "Available memory = %d bytes\n", (int)(gpuprop.totalGlobalMem));
-#endif
   //ld_bitsatatime = BITSATATIME;
   //ld_bitsmask = BITSMASK+1;
 
@@ -137,7 +134,7 @@ unsigned int cuda_app_init(int gpuno)
           // - d_factor_found[]
           if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
 #ifndef NDEBUG
-            fprintf(stderr, "Allocation successful!\n");
+            //fprintf(stderr, "Allocation successful!\n");
             //fprintf(stderr, "ld_bitsatatime = %u\n", ld_bitsatatime);
 #endif
             break;  // Allocation successful!
@@ -148,7 +145,7 @@ unsigned int cuda_app_init(int gpuno)
       }
       //cudaFree(d_bitsskip);
     //}
-    fprintf(stderr, "Insufficient available memory on GPU %d.\n", gpuno);
+    fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
     return 0;
   }
 
@@ -159,8 +156,8 @@ unsigned int cuda_app_init(int gpuno)
 
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
-    fprintf(stderr, "Error: pmin is not large enough (or nmax is close to nmin).\n");
-    exit(1);
+    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    bexit(1);
   }
   // Set the constants.
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
@@ -169,8 +166,8 @@ unsigned int cuda_app_init(int gpuno)
   bbits = lg2(nmin);
   //assert(d_r0 <= 32);
   if(bbits < 6) {
-    fprintf(stderr, "Error: nmin too small at %d (must be at least 64).\n", nmin);
-    exit(1);
+    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+    bexit(1);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
   // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
@@ -194,7 +191,8 @@ unsigned int cuda_app_init(int gpuno)
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
   cudaMemcpyToSymbol(d_nmax, &nmax, sizeof(nmax));
   cudaMemcpyToSymbol(d_nstep, &ld_nstep, sizeof(ld_nstep));
-  cudaMemcpyToSymbol(d_search_proth, &search_proth, sizeof(search_proth));
+  i = (search_proth == 1)?1:0;
+  cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
 
 
   return cthread_count;
@@ -276,7 +274,7 @@ asm_mulmod_REDC (const uint64_t a, const uint64_t b,
 #ifdef DEBUG64
 	if (longmod (r, 0, N) != mulmod(a, b, N))
 	{
-		fprintf (stderr, "Error, asm mulredc(%lu,%lu,%lu) = %lu\n", a, b, N, r);
+		fprintf (stderr, "%sError, asm mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, r);
 		abort();
 	}
 #endif
@@ -333,8 +331,8 @@ __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
 #ifdef DEBUG64
   if (longmod (rax, 0, N) != mulmod(a, b, N))
   {
-    fprintf (stderr, "Error, mulredc(%lu,%lu,%lu) = %lu\n", a, b, N, rax);
-    exit(1);
+    fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
+    bexit(1);
   }
 #endif
 
@@ -369,8 +367,8 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
   const uint64_t r = onemod_REDC(N, Ns*a);
 
   if (longmod (r, 0, N) != mulmod(a, 1, N)) {
-    fprintf (stderr, "Error, redc(%lu,%lu) = %lu\n", a, N, r);
-    exit(1);
+    fprintf (stderr, "%sError, redc(%lu,%lu) = %lu\n", bmprefix(), a, N, r);
+    bexit(1);
   }
 
   return r;
@@ -386,7 +384,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   uint64_t rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= d_mont_nstep;
+  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
   rcx = a >> d_nstep;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
@@ -404,8 +402,8 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
 #ifdef DEBUG64
   if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
   {
-    fprintf (stderr, "Error, shiftredc(%lu,%u,%lu) = %lu\n", a, d_mont_nstep, N, rax);
-    exit(1);
+    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    bexit(1);
   }
 #endif
 
@@ -490,7 +488,7 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
     kpos >>= i;
     if (kpos <= d_kmax) {
 #ifndef NDEBUG
-      fprintf(stderr, "%u | %u*2^%u+1 (P[%d])\n", (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+      fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
       my_factor_found = 1;
@@ -511,18 +509,18 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   // Pass P.
   res = cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
   if(res != cudaSuccess) {
-    if(res == cudaErrorInvalidValue) fprintf(stderr, "Memcpy error: Invalid value!\n");
-    if(res == cudaErrorInvalidDevicePointer) fprintf(stderr, "Memcpy error: Invalid device pointer!\n");
-    if(res == cudaErrorInvalidMemcpyDirection) fprintf(stderr, "Memcpy error: Invalid memcpy direction!\n");
-    exit(1);
+    if(res == cudaErrorInvalidValue) bmsg("Memcpy error: Invalid value!\n");
+    if(res == cudaErrorInvalidDevicePointer) bmsg("Memcpy error: Invalid device pointer!\n");
+    if(res == cudaErrorInvalidMemcpyDirection) bmsg("Memcpy error: Invalid memcpy direction!\n");
+    bexit(1);
   }
 #ifndef NDEBUG
-  fprintf(stderr, "Setup successful...\n");
+  bmsg("Setup successful...\n");
 #endif
   // Don't Pass K; it's calculated internally!
   d_check_ns<<<cthread_count/128,128>>>(d_P, d_factor_found);
 #ifndef NDEBUG
-  fprintf(stderr, "Main kernel successful...\n");
+  bmsg("Main kernel successful...\n");
 #endif
 }
 
@@ -531,7 +529,7 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
   // Get d_factor_found, into the thread'th factor_found array.
   cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &check_ns_delay, check_ns_overlap, start_t);
 #ifndef NDEBUG
-  fprintf(stderr, "Retrieve successful...\n");
+  bmsg("Retrieve successful...\n");
 #endif
 }
 

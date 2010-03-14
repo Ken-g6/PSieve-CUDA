@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 
-#define APP_VERSION "cuda-0.1.1-beta"
+#define APP_VERSION "cuda-0.1.1-rc1"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -29,7 +29,7 @@
 
 #define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:qa:s:b:"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:"
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
@@ -37,9 +37,8 @@
   {"nmax",          required_argument, 0, 'N'}, \
   {"input",         required_argument, 0, 'i'}, \
   {"factors",       required_argument, 0, 'f'}, \
-  {"bitsatatime",   required_argument, 0, 'b'}, \
-  {"alt",           required_argument, 0, 'a'}, \
-  {"sse2",          required_argument, 0, 's'},
+  {"device",        required_argument, 0, 'd'}, \
+  {"bitsatatime",   required_argument, 0, 'b'},
 
 void app_banner(void);
 int app_parse_option(int opt, char *arg, const char *source);
@@ -54,7 +53,8 @@ int app_read_checkpoint(FILE *f);
 void app_write_checkpoint(FILE *f);
 void app_fini(void);
 
-extern unsigned int nmin, nmax, search_proth;
+extern unsigned int nmin, nmax;
+extern int search_proth;
 extern uint64_t kmax;
 
 #endif /* _APP_H */

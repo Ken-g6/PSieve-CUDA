@@ -30,7 +30,7 @@
 #endif
 #endif
 #include "main.h"
-#include "util.h"
+#include "putil.h"
 #include "app.h"
 #include "appcu.h"
 #define INLINE static inline
@@ -75,18 +75,13 @@ static unsigned int nstart = 0, nstep = 0;
 static unsigned int factor_count = 0;
 static int file_format = FORMAT_ABCD;
 static int print_factors = 1;
-/*
-// use_sse2: 
-// 0: Use default algorithm
-// 1: Use alternate SSE2 algorithm
-// 2: (Default) Benchmark and find the best algorithm.
-static int use_sse2 = 2;*/
-unsigned int search_proth = 1;  // Search for Proth or Riesel numbers?
+int search_proth = 1; // Search for Proth or Riesel numbers?
 static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_start_times;
 static uint64_t** bitsskip;
 static unsigned char** factor_found;
+static int device_opt = -1;
 
 #ifdef _WIN32
 static CRITICAL_SECTION factors_mutex;
@@ -103,12 +98,11 @@ static void report_factor(uint64_t p, uint64_t k, unsigned int n, int c)
   pthread_mutex_lock(&factors_mutex);
 #endif
 
-  if (factors_file != NULL)
+  if (factors_file != NULL && fprintf(factors_file,"%"PRIu64" | %"PRIu64"*2^%u%+d\n",p,k,n,c) > 0)
   {
-    fprintf(factors_file,"%"PRIu64" | %"PRIu64"*2^%u%+d\n",p,k,n,c);
     if(print_factors) printf("%"PRIu64" | %"PRIu64"*2^%u%+d\n",p,k,n,c);
   }
-  else printf("UNSAVED: %"PRIu64" | %"PRIu64"*2^%u%+d\n",p,k,n,c);
+  else fprintf(stderr, "%sUNSAVED: %"PRIu64" | %"PRIu64"*2^%u%+d\n",bmprefix(),p,k,n,c);
   factor_count++;
 
 #ifdef _WIN32
@@ -149,31 +143,36 @@ static FILE* scan_input_file(const char *fn)
   FILE *file;
   uint64_t k0, k1, k, p0;
   unsigned int n0, n1, d, n;
+  int filesearch_proth;
   char ch;
 
-  if ((file = fopen(fn,"r")) == NULL)
+  if ((file = bfopen(fn,"r")) == NULL)
   {
     perror(fn);
-    exit(EXIT_FAILURE);
+    bexit(EXIT_FAILURE);
   }
 
 
-  if (fscanf(file,"ABCD %"SCNu64"*2^$a+1 [%u]",
-             &k,&n) == 2)
-    file_format = FORMAT_ABCD;
-  else if (fscanf(file,"%"SCNu64":P:%*c:2:%c",&p0,&ch) == 2 && ch == '1')
+  if (fscanf(file,"ABCD %"SCNu64"*2^$a%c1 [%u]",
+             &k,&ch,&n) == 3)
   {
+    file_format = FORMAT_ABCD;
+    search_proth = (ch=='+')?1:-1;
+  }
+  else if (fscanf(file,"%"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) == 2 && (filesearch_proth == 1 || filesearch_proth == -1 || filesearch_proth == 255 || filesearch_proth == 257))
+  {
+    search_proth = (int)((char)filesearch_proth);
     file_format = FORMAT_NEWPGEN;
     if (fscanf(file," %"SCNu64" %u",&k,&n) != 2)
     {
-      fprintf(stderr,"Invalid line 2 in input file `%s'\n",fn);
-      exit(EXIT_FAILURE);
+      fprintf(stderr,"%sInvalid line 2 in input file `%s'\n",bmprefix(),fn);
+      bexit(EXIT_FAILURE);
     }
   }
   else
   {
-    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
+    bexit(EXIT_FAILURE);
   }
 
   k0 = k1 = k;
@@ -205,10 +204,12 @@ static FILE* scan_input_file(const char *fn)
       if (n1 < n)
         n1 = n;
 
-      if (fscanf(file, " ABCD %"SCNu64"*2^$a+1 [%u]",
-                 &k,&n) == 2)
+      if (fscanf(file, " ABCD %"SCNu64"*2^$a%c1 [%u]",
+                 &k,&ch,&n) == 3)
       {
+#ifndef USE_BOINC
         if((((int)k)&15) == 1) printf("\rFound K=%"SCNu64"\r", k);
+#endif
         fflush(stdout);
         if (k0 > k)
           k0 = k;
@@ -242,8 +243,8 @@ static FILE* scan_input_file(const char *fn)
 
   if (ferror(file))
   {
-    fprintf(stderr,"Error reading input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sError reading input file `%s'\n",bmprefix(),fn);
+    bexit(EXIT_FAILURE);
   }
 
   rewind(file);
@@ -273,20 +274,20 @@ static void read_newpgen_file(const char *fn, FILE* file)
   //FILE *file;
   uint64_t k, p0;
   unsigned int n, line, count;
-  char ch;
+  int filesearch_proth;
 
   if(file == NULL) {
-    if ((file = fopen(fn,"r")) == NULL)
+    if ((file = bfopen(fn,"r")) == NULL)
     {
       perror(fn);
-      exit(EXIT_FAILURE);
+      bexit(EXIT_FAILURE);
     }
   }
 
-  if (fscanf(file," %"SCNu64":P:%*c:2:%c",&p0,&ch) != 2 || ch != '1')
+  if (fscanf(file," %"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) != 2)
   {
-    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
+    bexit(EXIT_FAILURE);
   }
 
   line = 0;
@@ -296,8 +297,8 @@ static void read_newpgen_file(const char *fn, FILE* file)
     line++;
     if ((k&1) != 1)
     {
-      fprintf(stderr,"Invalid line %u in input file `%s'\n",line,fn);
-      exit(EXIT_FAILURE);
+      fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
+      bexit(EXIT_FAILURE);
     }
     if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
     {
@@ -309,8 +310,8 @@ static void read_newpgen_file(const char *fn, FILE* file)
 
   if (ferror(file))
   {
-    fprintf(stderr,"Error reading input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sError reading input file `%s'\n",bmprefix(),fn);
+    bexit(EXIT_FAILURE);
   }
 
   //rewind(file);
@@ -328,17 +329,17 @@ static void read_abcd_file(const char *fn, FILE *file)
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
-    if ((file = fopen(fn,"r")) == NULL)
+    if ((file = bfopen(fn,"r")) == NULL)
     {
       perror(fn);
-      exit(EXIT_FAILURE);
+      bexit(EXIT_FAILURE);
     }
   }
-  if (fscanf(file, "ABCD %"SCNu64"*2^$a+1 [%u]",
+  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
         &k,&n) != 2)
   {
-    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
+    bexit(EXIT_FAILURE);
   }
 
   count = 0;
@@ -351,7 +352,7 @@ static void read_abcd_file(const char *fn, FILE *file)
     unsigned int bm8 = (unsigned int)(1 << bit%8);
     /*if(k < kmin || k > kmax || bit < 0 || bit > (kmax-kmin)/2) {
       printf("\n\nK error: K = %"SCNu64", which is outside %"SCNu64" - %"SCNu64"\n\n\n", k, kmin, kmax);
-      exit(EXIT_FAILURE);
+      bexit(EXIT_FAILURE);
     }*/
     if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
     count++;
@@ -374,16 +375,18 @@ static void read_abcd_file(const char *fn, FILE *file)
       /*if(n > nmax) {
         printf("\n\nN error: N = %u, but nmax = %u\n\n\n", n, nmax);
         if(file == NULL) printf("\n\nError: File was closed!\n");
-        exit(EXIT_FAILURE);
+        bexit(EXIT_FAILURE);
       }*/
       if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
       count++;
       while(c != '\n') c=getc(file);
     }
+#ifndef USE_BOINC
     if((((int)k)&15) == 1) printf("\rRead K=%"SCNu64"\r", k);
+#endif
     fflush(stdout);
 
-    if (fscanf(file, "ABCD %"SCNu64"*2^$a+1 [%u]",
+    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
           &k,&n) != 2) {
       break;
     }
@@ -392,7 +395,7 @@ static void read_abcd_file(const char *fn, FILE *file)
   if (ferror(file))
   {
     printf("\nError reading input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
+    bexit(EXIT_FAILURE);
   }
   //printf("\n\nDone reading ABCD file!\n");
 
@@ -439,9 +442,11 @@ int app_parse_option(int opt, char *arg, const char *source)
 
   switch (opt)
   {
+    /*
     case 'b':
       status = parse_uint(&bitsatatime,arg,1,(1U<<31)-1);
       break;
+      */
       
     case 'k':
       status = parse_uint64(&kmin,arg,1,(UINT64_C(1)<<62)-1);
@@ -467,18 +472,16 @@ int app_parse_option(int opt, char *arg, const char *source)
       factors_filename = (source == NULL)? arg : xstrdup(arg);
       break;
 
-      /*
-    case 's':
-    case 'a':
-      if(arg[0] == 'y' || arg[0] == 'Y') use_sse2 = 1;
-      else if(arg[0] == 'n' || arg[0] == 'N') use_sse2 = 0;
-      break;*/
-      
+    case 'd':
+      status = parse_uint((unsigned int *)(&device_opt),arg,1,INT32_MAX);
+      break;
+
+    case 'R':
+      search_proth = -1;
+      break;
     //case 'q':
       //print_factors = 0;
-    case 'R':
-      search_proth = 0;
-      break;
+      //break;
   }
 
   return status;
@@ -486,8 +489,7 @@ int app_parse_option(int opt, char *arg, const char *source)
 
 void app_help(void)
 {
-  printf("-a --alt=yes|no    Force setting of alt. algorithm (64-bit/SSE2)\n");
-  printf("-b --bitsatatime=b Bits to use at a time: fiddle with this, 5-9.\n");
+  //printf("-b --bitsatatime=b Bits to use at a time: fiddle with this, 5-9.\n");
   printf("-f --factors=FILE  Write factors to FILE (default `%s')\n",
          FACTORS_FILENAME_DEFAULT);
   printf("-i --input=FILE    Read initial sieve from FILE\n");
@@ -496,6 +498,7 @@ void app_help(void)
   printf("-n --nmin=N0\n");
   printf("-N --nmax=N1       Sieve for primes k*2^n+/-1 with N0 <= n <= N1\n");
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
+  printf("-d --device=N      Use GPU N instead of 0-threads\n");
 }
 
 // find the log base 2 of a number.  Need not be fast; only done twice.
@@ -516,8 +519,8 @@ void app_init(void)
   print_factors = (quiet_opt)?0:1;
   if (input_filename == NULL && (kmin == 0 || kmax == 0))
   {
-    fprintf(stderr,"Please specify an input file or both of kmin,kmax\n");
-    exit(EXIT_FAILURE);
+    bmsg("Please specify an input file or all of kmin, kmax, and nmax\n");
+    bexit(EXIT_FAILURE);
   }
 
   if (input_filename != NULL
@@ -526,31 +529,33 @@ void app_init(void)
 
   if (kmin > kmax)
   {
-    fprintf(stderr,"kmin <= kmax is required\n");
-    exit(EXIT_FAILURE);
+    bmsg("kmin <= kmax is required\n");
+    bexit(EXIT_FAILURE);
   }
 
   if (kmax >= pmin)
   {
-    fprintf(stderr,"kmax < pmin is required\n");
-    exit(EXIT_FAILURE);
+    bmsg("kmax < pmin is required\n");
+    bexit(EXIT_FAILURE);
   }
 
   if (kmax-kmin >= (UINT64_C(3)<<36))
   {
-    fprintf(stderr,"kmax-kmin < 3*2^36 is required\n");
-    exit(EXIT_FAILURE);
+    bmsg("kmax-kmin < 3*2^36 is required\n");
+    bexit(EXIT_FAILURE);
   }
 
   if (nmin == 0)
   {
+    // k*2^n is prime if k*2^n < p^2
+    // 2^n < p^2/k
     // We can calculate nmin = at least 2*log2(pmin)-log2(kmax),
     // because any number smaller than this, divisible by this prime,
     // would also have been divisible by a smaller prime.
     nmin = 2*lg2(pmin)-lg2(kmax)-1;
 
-    //fprintf(stderr,"Please specify a value for nmin\n");
-    //exit(EXIT_FAILURE);
+    //bmsg("Please specify a value for nmin\n");
+    //bexit(EXIT_FAILURE);
   }
 
   if (nmax == 0)
@@ -558,8 +563,8 @@ void app_init(void)
 
   if (nmin > nmax)
   {
-    fprintf(stderr,"nmin <= nmax is required\n");
-    exit(EXIT_FAILURE);
+    bmsg("nmin <= nmax is required\n");
+    bexit(EXIT_FAILURE);
   }
 
   b0 = kmin/2;
@@ -599,10 +604,10 @@ void app_init(void)
 
   if (factors_filename == NULL)
     factors_filename = FACTORS_FILENAME_DEFAULT;
-  if ((factors_file = fopen(factors_filename,"a")) == NULL)
+  if ((factors_file = bfopen(factors_filename,"a")) == NULL)
   {
-    fprintf(stderr,"Cannot open factors file `%s'\n",factors_filename);
-    exit(EXIT_FAILURE);
+    fprintf(stderr,"%sCannot open factors file `%s'\n",bmprefix(),factors_filename);
+    bexit(EXIT_FAILURE);
   }
 
   // Allocate the bitsskip arrays.
@@ -639,7 +644,11 @@ unsigned int app_thread_init(int th)
   uint16_t mode;
   unsigned int cthread_count;
 
-  cthread_count = cuda_app_init(th);
+  if(device_opt >= 0) {
+    cthread_count = cuda_app_init(device_opt);
+  } else {
+    cthread_count = cuda_app_init(th);
+  }
 
   // Allocate the factor_found arrays.
   if(cthread_count > 0) {
@@ -647,7 +656,7 @@ unsigned int app_thread_init(int th)
     for(i=0; i < cthread_count; i++) {
       factor_found[th][i] = 0;
     }
-  }
+  } else factor_found[th] = NULL;
 
   /* Set FPU to use extended precision and round to zero. This has to be
      done here rather than in app_init() because _beginthreadex() doesn't
@@ -690,7 +699,7 @@ inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
   unsigned int l_nmax = nmax + ld_nstep;
   int cands_found = 0;
   fillbitskip(bs0, P);
-  if(search_proth) k0 = P-k0;
+  if(search_proth == 1) k0 = P-k0;
   n = nmin;
   do { // Remaining steps are all of equal size nstep
     //int j;
@@ -729,7 +738,7 @@ inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
     n += nstep;
   } while (n < l_nmax);
   if(cands_found == 0) {
-    fprintf(stderr, "Computation Error: no candidates found for p=%"PRIu64".\n", P);
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), P);
   }
 }
 // Given APP_BUFLEN P's, calculate the appropriate K's to start with, based on nmin.
@@ -762,7 +771,6 @@ void init_ks(const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribu
                   "fld1\n\t"
                   "fdivp"
                   : : "m" (P[(APP_BUFLEN-1)-i]) );
-    //if(P[i] == 42070000198537ul) fprintf(stderr, "Setting K0 for P=42070000198537\n");
 #ifndef __x86_64__
 #ifndef __SSE2__
     K[i] = (P[i]+1)/2; /* K[i] <-- 2^{-1} mod P[i] */
@@ -1210,7 +1218,7 @@ void app_fini(void)
   }
   free(bitsskip);
   for(i=0; i < num_threads; i++) {
-    free(factor_found[i]);
+    if(factor_found[i] != NULL) free(factor_found[i]);
   }
   free(factor_found);
 }
