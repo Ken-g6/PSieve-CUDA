@@ -27,10 +27,3 @@ chunksize=16k
 
 # Uncomment to prevent printing of factors to STDOUT
 #quiet
-
-# BOINC-compatible test range:
-#pmin=42070e9
-#pmax=42070003e6
-#kmin=1201
-#kmax=9999
-#nmax=2000000

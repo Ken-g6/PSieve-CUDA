@@ -1,3 +1,11 @@
+Date:   Sat Mar 13 18:09:33 2010 -0700
+    BOINCified, I think.
+    
+    Includes adding --device switch, renaming util->putil.
+Date:   Thu Mar 11 15:33:26 2010 -0700
+    Rearranged to keep GPU running.  Only partly tested.
+Date:   Mon Mar 8 13:00:31 2010 -0700
+    Minor text file changes (including poetry!)
 Date:   Sun Mar 7 18:07:31 2010 -0700
     Better ffsll, text file cleanup
     

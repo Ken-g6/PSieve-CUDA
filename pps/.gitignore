@@ -5,3 +5,8 @@ ppfactors.txt
 
 # Binaries:
 ppsieve-*-linux
+
+# BOINC files:
+boinc_finish_called
+init_data.xml
+stderr.txt
