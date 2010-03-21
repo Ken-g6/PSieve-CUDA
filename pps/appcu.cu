@@ -205,6 +205,12 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
 #endif
 }
 
+// With P parsed into 24-bit chunks ph<<48+pm<<24+pl, multiply P by <= 8-bit value m.
+// TODO: Create a version specifically for up-to-48-bit P.  (With the shift, that's up-to-52-bit P.)
+__device__ uint64_t umul64x8(const unsigned int ph, const unsigned int pm, const unsigned int pl, const unsigned int m) {
+  return (((uint64_t)__umul24(ph,m)) << 48) + (((uint64_t)__umul24(pm,m)) << 24) + ((uint64_t)__umul24(pl,m));
+}
+
 // Check all N's.
 __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *factor_found_arr, uint64_t *bitsskip) {
   unsigned int n = d_nmin; // = nmin;
@@ -213,7 +219,7 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   uint64_t kpos;
   unsigned char my_factor_found = 0;
   uint64_t my_P;
-  unsigned int shift;
+  unsigned int shift, ph, pm;
 #ifndef NDEBUG
   uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
 #endif
@@ -237,9 +243,12 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   
   if(d_search_proth) k0 = my_P-k0;
   my_P >>= BITSATATIME;
+  ph = (unsigned int)(my_P >> 48);
+  pm = (unsigned int)(my_P >> 24);
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     kpos = k0;
+    // TODO: Fix this to redc expanded version
     i = __ffsll(kpos)-1;
 
     kpos >>= i;
@@ -255,11 +264,12 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
       shift=BITSATATIME*(((unsigned int)k0)&BITSMASK);
 #ifndef NDEBUG
       if(shift > BITSATATIME && (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] != ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)))) {
-        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", (unsigned int)k0 & BITSMASK, bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
+        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", ((unsigned int)k0) & BITSMASK, bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
       }
       assert((shift == 0 && ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK) == 0)) || shift == BITSATATIME || (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] == ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK))));
 #endif
-      k0 = (k0 >> BITSATATIME) + (((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK);
+      //k0 = (k0 >> BITSATATIME) + (((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK);
+      k0 = (k0 >> BITSATATIME) + umul64x8(ph, pm, (unsigned int)my_P, (((unsigned int)(mul_shift>>shift))&BITSMASK)) + (((unsigned int)(off_shift>>shift))&BITSMASK);
     }
     n += d_nstep;
   } while (n < d_nmax);

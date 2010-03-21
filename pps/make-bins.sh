@@ -8,7 +8,7 @@ if uname -a | grep " 2.6.28[^ ]* [^ a-zA-Z]*Ubuntu" > /dev/null ; then
 fi
 if [ "$kernel" != "" ] ; then export LD_ASSUME_KERNEL=$kernel ; fi
 #
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-x86-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-x86-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
 #nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -march=pentium-m -msse2 -I. -I.. -o $appname-x86-linux-sse2 ../main.c ../sieve.c ../clock.c ../util.c app.c -lm -lpthread
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
 #if [ -f /multimedia/mingw/bin/gcc.exe ] ; then
@@ -20,9 +20,9 @@ if [ "$kernel" != "" ] ; then export LD_ASSUME_KERNEL=$kernel ; fi
 #gcc -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -march=k8 -mno-3dnow -mtune=core2 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c app.c -lm -lpthread
 # --ptxas-options=-v : Print the number of registers used by each kernel.
 # -deviceemu : compile for the CPU emulator.
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DBITSATATIME=3 -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-24bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBUSYWAIT -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-64bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
-nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DBITSATATIME=3 -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-24bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-64bit-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
+#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-x86_64-linux ../main.c ../sieve.c ../clock.c ../util.c cuda_sleep_memcpy.cu appcu.cu app.c -lm -lpthread
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
 #
 #if [ -f /multimedia/mingw64/bin/x86_64-w64-mingw32-gcc.exe ] ; then
