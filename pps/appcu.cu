@@ -47,6 +47,7 @@ __constant__ unsigned int d_nmin;
 __constant__ unsigned int d_nmax;
 __constant__ unsigned int d_nstep;
 __constant__ unsigned int d_search_proth;
+__constant__ unsigned int d_in48bits;
 // Device arrays
 uint64_t *d_P;
 uint64_t *d_K;
@@ -146,6 +147,8 @@ unsigned int cuda_app_init(int gpuno)
   // But the following would not.
   i >>= 1;
   cudaMemcpyToSymbol(d_halflen, &i, sizeof(i));//=(1<<bitsatatime)/2; 
+  i = (pmax < (((uint64_t)1)<<(48+BITSATATIME)))?1:0;
+  cudaMemcpyToSymbol(d_in48bits, &i, sizeof(i));//=(1<<bitsatatime)/2; 
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
   cudaMemcpyToSymbol(d_bpernstep, &ld_bpernstep, sizeof(ld_bpernstep));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
@@ -206,9 +209,12 @@ __global__ void d_setup_ps(const uint64_t *P, uint64_t *bitsskip) {
 }
 
 // With P parsed into 24-bit chunks ph<<48+pm<<24+pl, multiply P by <= 8-bit value m.
-// TODO: Create a version specifically for up-to-48-bit P.  (With the shift, that's up-to-52-bit P.)
 __device__ uint64_t umul64x8(const unsigned int ph, const unsigned int pm, const unsigned int pl, const unsigned int m) {
   return (((uint64_t)__umul24(ph,m)) << 48) + (((uint64_t)__umul24(pm,m)) << 24) + ((uint64_t)__umul24(pl,m));
+}
+// A version specifically for up-to-48-bit P.  (With the shift, that's up-to-52-bit P.)
+__device__ uint64_t umul64x8sm(const unsigned int pm, const unsigned int pl, const unsigned int m) {
+  return (((uint64_t)__umul24(pm,m)) << 24) + ((uint64_t)__umul24(pl,m));
 }
 
 // Check all N's.
@@ -248,8 +254,14 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   my_factor_found = 0;
   do { // Remaining steps are all of equal size nstep
     kpos = k0;
-    // TODO: Fix this to redc expanded version
-    i = __ffsll(kpos)-1;
+    //i = __ffsll(kpos)-1;
+    i = (unsigned int)kpos;
+    if(i != 0) {
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
+    } else {
+      i = (unsigned int)(kpos>>32);
+      i=63 - __clz (i & -i);
+    }
 
     kpos >>= i;
     if (kpos <= d_kmax) {
@@ -275,7 +287,75 @@ __global__ void d_check_ns(const uint64_t *P, const uint64_t *K, unsigned char *
   } while (n < d_nmax);
   factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
 }
+// Check all N's, when P>>BITSATATIME < 2^48.
+__global__ void d_check_ns_small(const uint64_t *P, const uint64_t *K, unsigned char *factor_found_arr, uint64_t *bitsskip) {
+  unsigned int n = d_nmin; // = nmin;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  uint64_t k0;
+  uint64_t kpos;
+  unsigned char my_factor_found = 0;
+  uint64_t my_P;
+  unsigned int shift, pm;
+#ifndef NDEBUG
+  uint64_t *bs0 = &bitsskip[blockIdx.x * BLOCKSIZE*d_len + threadIdx.x];
+#endif
+  SHIFT_CAST mul_shift, off_shift;
 
+  //factor_found_arr[i] = 0;
+  i = blockIdx.x * BLOCKSIZE*d_len + threadIdx.x;
+#if(BITSATATIME == 3)
+  my_P = bitsskip[i];
+  mul_shift = (unsigned int)my_P;
+  off_shift = (unsigned int)(my_P >> 32);
+#elif(BITSATATIME == 4)
+  mul_shift = bitsskip[i];
+  off_shift = bitsskip[i+BLOCKSIZE];
+#else
+  #error "Invalid BITSATATIME."
+#endif
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  k0 = K[i];
+  my_P = P[i];
+  
+  if(d_search_proth) k0 = my_P-k0;
+  my_P >>= BITSATATIME;
+  pm = (unsigned int)(my_P >> 24);
+  my_factor_found = 0;
+  do { // Remaining steps are all of equal size nstep
+    kpos = k0;
+    //i = __ffsll(kpos)-1;
+    i = (unsigned int)kpos;
+    if(i != 0) {
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
+    } else {
+      i = (unsigned int)(kpos>>32);
+      i=63 - __clz (i & -i);
+    }
+
+    kpos >>= i;
+    if (kpos <= d_kmax) {
+#ifndef NDEBUG
+      fprintf(stderr, "%u | %u*2^%u+1 (P[%d])\n", (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      my_factor_found = 1;
+    }
+
+    for(i=0; i < d_bpernstep; i++) {
+      shift=BITSATATIME*(((unsigned int)k0)&BITSMASK);
+#ifndef NDEBUG
+      if(shift > BITSATATIME && (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] != ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)))) {
+        fprintf(stderr, "Array lookup[%d], %lu != register lookup %lu\n", ((unsigned int)k0) & BITSMASK, bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE], ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK)));
+      }
+      assert((shift == 0 && ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK) == 0)) || shift == BITSATATIME || (bs0[((unsigned int)k0 & BITSMASK)*BLOCKSIZE] == ((((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK))));
+#endif
+      //k0 = (k0 >> BITSATATIME) + (((unsigned int)(mul_shift>>shift))&BITSMASK)*my_P + (((unsigned int)(off_shift>>shift))&BITSMASK);
+      k0 = (k0 >> BITSATATIME) + umul64x8sm(pm, (unsigned int)my_P, (((unsigned int)(mul_shift>>shift))&BITSMASK)) + (((unsigned int)(off_shift>>shift))&BITSMASK);
+    }
+    n += d_nstep;
+  } while (n < d_nmax);
+  factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
+}
 // Pass the first arguments to the CUDA device and do setup.
 void setup_ps(const uint64_t *P, unsigned int cthread_count) {
   cudaError_t res;
@@ -312,7 +392,11 @@ void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsig
 #ifndef NDEBUG
   fprintf(stderr, "Memcpy2 successful...\n");
 #endif
-  d_check_ns<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
+  if(pmax < (((uint64_t)1)<<(48+BITSATATIME))) {
+    d_check_ns<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
+  } else {
+    d_check_ns_small<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
+  }
 #ifndef NDEBUG
   fprintf(stderr, "Main kernel successful...\n");
 #endif

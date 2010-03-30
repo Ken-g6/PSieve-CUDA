@@ -1,4 +1,5 @@
 appname=ppsieve-cuda
+# Test: ./ppsieve-cuda-x86_64-linux -p42070e9 -P42070003e6 -k 1201 -K 9999 -N 2000000 -z normal
 #DOEMU=-deviceemu
 #cleanvars="-fomit-frame-pointer -s"
 #cleanvars="-s"
