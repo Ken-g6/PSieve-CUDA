@@ -55,6 +55,6 @@ void app_fini(void);
 
 extern unsigned int nmin, nmax;
 extern int search_proth;
-extern uint64_t kmax;
+extern uint64_t kmax, kmin;
 
 #endif /* _APP_H */

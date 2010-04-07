@@ -39,12 +39,15 @@
 */
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
+int ld_bbits;
+uint64_t ld_r0;
 
 // Device constants
 //__constant__ unsigned int d_bitsatatime;
 //__constant__ unsigned int d_len;//=(1<<bitsatatime); 
 //__constant__ unsigned int d_halflen;//=(1<<bitsatatime)/2; 
 __constant__ uint64_t d_kmax;
+__constant__ uint64_t d_kmin;
 //__constant__ unsigned int d_bpernstep;
 __constant__ unsigned int d_nmin;
 __constant__ unsigned int d_nmax;
@@ -85,8 +88,6 @@ unsigned int cuda_app_init(int gpuno)
   //unsigned int ld_halflen=(1<<bitsatatime)/2; 
   //unsigned int ld_bitsmask;
   //unsigned int ld_bpernstep;
-  uint64_t ld_r0;
-  int bbits;
   unsigned int cthread_count;
 
   // Find the GPU's properties.
@@ -163,18 +164,18 @@ unsigned int cuda_app_init(int gpuno)
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
 
   // Prepare constants:
-  bbits = lg2(nmin);
+  ld_bbits = lg2(nmin);
   //assert(d_r0 <= 32);
-  if(bbits < 6) {
+  if(ld_bbits < 6) {
     fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
     bexit(1);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
   // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
-  ld_r0 = ((uint64_t)1) << (64-(nmin >> (bbits-5)));
+  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
 
-  bbits = bbits-6;
-  cudaMemcpyToSymbol(d_bbits, &bbits, sizeof(bbits));
+  ld_bbits = ld_bbits-6;
+  cudaMemcpyToSymbol(d_bbits, &ld_bbits, sizeof(ld_bbits));
   // d_mont_nstep is the montgomerized version of nstep.
   i = 64-ld_nstep;
   cudaMemcpyToSymbol(d_mont_nstep, &i, sizeof(i));
@@ -187,6 +188,7 @@ unsigned int cuda_app_init(int gpuno)
   //i >>= 1;
   //cudaMemcpyToSymbol(d_halflen, &i, sizeof(i));//=(1<<bitsatatime)/2; 
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
+  cudaMemcpyToSymbol(d_kmin, &kmin, sizeof(kmin));
   //cudaMemcpyToSymbol(d_bpernstep, &ld_bpernstep, sizeof(ld_bpernstep));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
   cudaMemcpyToSymbol(d_nmax, &nmax, sizeof(nmax));
@@ -350,9 +352,8 @@ __device__ uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
   rcx = (rax!=0)?1:0;
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = __umul64hi(rax, N);
+  rax = __umul64hi(rax, N) + rcx;
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
-  rax += rcx;
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
 
@@ -393,9 +394,8 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
   rcx += (rax!=0)?1:0;
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = __umul64hi(rax, N);
+  rax = __umul64hi(rax, N) + rcx;
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
-  rax += rcx;
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
 
@@ -433,7 +433,7 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
     // Just keep squaring r.
-    mulmod_REDC(r, r, N, Ns);
+    r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
     if(d_nmin & (1u << bbits)) {
       r += (r&1)?N:0;
@@ -461,12 +461,13 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
   uint64_t my_P, Ps;
   my_P = P[i];
   
-  assert(longmod(1, 0, 47) == 25);
   // Better get this done before the first mulmod.
   Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
   
   // Calculate k0, in Montgomery form.
   k0 = invpowmod_REDClr(my_P, Ps);
+
+  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, Ps);
 
   if(d_search_proth) k0 = my_P-k0;
 
@@ -491,7 +492,7 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
       fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
-      my_factor_found = 1;
+      if(kpos >= d_kmin) my_factor_found = 1;
     }
 
     // Proceed to the K for the next N.

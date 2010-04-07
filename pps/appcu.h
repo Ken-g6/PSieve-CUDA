@@ -24,6 +24,7 @@ void cuda_finalize(void);
 #endif
 
 extern unsigned int ld_nstep;
-extern unsigned int gpuno;
+extern int ld_bbits;
+extern uint64_t ld_r0;
 
 #endif

@@ -10,3 +10,6 @@ ppsieve-*-linux
 boinc_finish_called
 init_data.xml
 stderr.txt
+
+# Recursive definitions:
+CHANGES.txt

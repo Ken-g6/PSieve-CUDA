@@ -77,9 +77,9 @@ static int file_format = FORMAT_ABCD;
 static int print_factors = 1;
 int search_proth = 1; // Search for Proth or Riesel numbers?
 static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
-static unsigned int bitsmask, bpernstep;
+//static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_start_times;
-static uint64_t** bitsskip;
+//static uint64_t** bitsskip;
 static unsigned char** factor_found;
 static int device_opt = -1;
 
@@ -576,13 +576,14 @@ void app_init(void)
     ;
   ld_nstep = nstep;
   // Calculate the values that fit the given bitsatatime.
+  /*
   if (nstep > bitsatatime) {
     bpernstep = nstep/bitsatatime;
     nstep = bpernstep*bitsatatime;
   }
   if (nstep > (nmax-nmin+1))
     nstep = (nmax-nmin+1);
-
+  */
   nstart = nmin;
 
   printf("nstart=%u, nstep=%u, gpu_nstep=%u\n",nstart,nstep,ld_nstep);
@@ -611,12 +612,14 @@ void app_init(void)
   }
 
   // Allocate the bitsskip arrays.
+  /*
   bitsskip = xmalloc(num_threads*sizeof(uint64_t*));
   bitsmask = 1<<bitsatatime; // Not finalized here - off by 1.
   for(i=0; i < num_threads; i++) {
     bitsskip[i] = xmalloc(bitsmask*sizeof(uint64_t));
   }
   bitsmask--; // Finalize bitsmask.
+  */
 
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
   gpu_start_times = xmalloc(num_threads*sizeof(uint64_t));
@@ -668,417 +671,246 @@ unsigned int app_thread_init(int th)
   return cthread_count;
 }
 
-// Fill the bitskip array, to multiply by 2^-b at once.
-// O(2^bitsatatime) performance, only 2^bitsatatime writes.
-void fillbitskip(uint64_t *bitskip, uint64_t p) {
-  int len = 1<<bitsatatime;
-  int halflen=len/2; 
-  int j, k; 
+/*  Multiplies for REDC code  */
 
-  // Initialize the first two entries.
-  bitskip[halflen] = (p+1)/2;	// Needed first.
-  bitskip[0] = 0;			// Ignored through the end.
-
-  // Fill in the intervening spaces, two numbers at a time.
-  for(j=halflen; j > 1; j >>= 1) {
-    for(k=j/2; k < halflen; k+=j) {
-      register uint64_t bl = bitskip[2*k];
-      //printf("Filling k=%d from bitskip=%lu\n", k, bl);
-      bitskip[k] = (bl+((bl&1)?p:(uint64_t)0))/2;
-      //printf("Filling k=%d\n", k+halflen);
-      bitskip[k+halflen] = (bl+1+((bl&1)?(uint64_t)0:p))/2;
-    }
-  }
-}
-
-inline void test_one_p(const uint64_t P, uint64_t k0, int th) {
-  uint64_t n; // = nmin;
-  //uint64_t k0 = K;
-  // Initialize bitsskip array.
-  uint64_t *bs0 = bitsskip[th];
-  unsigned int l_nmax = nmax + ld_nstep;
-  int cands_found = 0;
-  fillbitskip(bs0, P);
-  if(search_proth == 1) k0 = P-k0;
-  n = nmin;
-  do { // Remaining steps are all of equal size nstep
-    //int j;
-    uint64_t kpos;
-    unsigned int mpos;
-    kpos = k0;
-    mpos = __builtin_ctzll(kpos);
-
-    kpos >>= mpos;
-    if (kpos <= kmax) {
-      cands_found++;
-      if (kpos >= kmin && mpos < nstep)
-        test_factor(P,kpos,n+mpos,+1);
-    }
-
-    switch(bpernstep) {
-      case 12:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 11:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 10:k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 9: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 8: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 7: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 6: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 5: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 4: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 3: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 2: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-      case 1: k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-              break;
-              /*default:
-                for(j=0; j < bpernstep; j++) {
-                k0 = (k0 >> bitsatatime) + bs0[(unsigned int)k0 & bitsmask];
-                }
-                break;*/
-    }
-    n += nstep;
-  } while (n < l_nmax);
-  if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), P);
-  }
-}
-// Given APP_BUFLEN P's, calculate the appropriate K's to start with, based on nmin.
-void init_ks(const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) K)
+#if defined(GCC) && defined(__x86_64__)
+uint64_t __umul64hi(uint64_t a, uint64_t b)
 {
-  uint64_t T[APP_BUFLEN] __attribute__((aligned(16)));
-#if (APP_BUFLEN >= 7)
-  long double INV[APP_BUFLEN-6];
-#endif
-#ifdef EMM
-  static const uint64_t xones[2] __attribute__((aligned(16))) = {1ul, 1ul};
-  __m128i mones = _mm_load_si128((__m128i*)xones);
-#endif
-#ifdef __x86_64__
-  uint64_t x;
-#ifndef _WIN32
-  unsigned int nbits, t;
-#endif
+  uint64_t t1, t2;
+  __asm__
+  ( "mulq %3\n\t"
+    : "=a" (t1), "=d" (t2)
+    : "0" (a), "rm" (b)
+    : "cc");
+  return t2;
+}
 #else
-  unsigned int x;
-#endif
-  unsigned int i, n;
-
-  n = nstart;
-
-#if (APP_BUFLEN <= 6)
-  for (i = 0; i < APP_BUFLEN; i++)
-  {
-    asm volatile ("fildll %0\n\t"
-                  "fld1\n\t"
-                  "fdivp"
-                  : : "m" (P[(APP_BUFLEN-1)-i]) );
-#ifndef __x86_64__
-#ifndef __SSE2__
-    K[i] = (P[i]+1)/2; /* K[i] <-- 2^{-1} mod P[i] */
-#endif
-#endif
-  }
+#if defined(GCC) && !defined(__x86_64__)
+unsigned int __umulhi(unsigned int a, unsigned int b)
+{
+  unsigned int t1, t2;
+  __asm__
+  ( "mull %3\n\t"
+    : "=a" (t1), "=d" (t2)
+    : "0" (a), "rm" (b)
+    : "cc");
+  return t2;
+}
 #else
-  for (i = 0; i < 6; i++)
-    asm volatile ("fildll %0\n\t"
-                  "fld1\n\t"
-                  "fdivp"
-                  : : "m" (P[5-i]) );
+unsigned int __umulhi(unsigned int a, unsigned int b)
+{
+  uint64_t c = (uint64_t)a * (uint64_t)b;
 
-  for ( ; i < APP_BUFLEN; i++)
-    asm volatile ("fildll %1\n\t"
-                  "fld1\n\t"
-                  "fdivp\n\t"
-                  "fstpt %0"
-                  : "=m" (INV[i-6]) : "m" (P[i]) );
-
-#ifndef __x86_64__
-#ifndef __SSE2__
-  for (i = 0; i < APP_BUFLEN; i++)
-    K[i] = (P[i]+1)/2; /* K[i] <-- 2^{-1} mod P[i] */
-#endif
-#endif
+  return (unsigned int)(c >> 32);
+}
 #endif
 
-#ifdef __SSE2__
-  x = 1U << (30 - __builtin_clz(n));
-  {
-    // Load the P's into SSE2 registers.
-    __m128i mp0 = _mm_load_si128((__m128i*)(&P[0]));
-    __m128i mp1 = _mm_load_si128((__m128i*)(&P[2]));
-    __m128i mp2 = _mm_load_si128((__m128i*)(&P[4]));
-    __m128i mtemp, mk;
+uint64_t __umul64hi(uint64_t a, uint64_t b)
+{
+  unsigned int           a_lo = (unsigned int)a;
+  uint64_t a_hi = a >> 32;
+  unsigned int           b_lo = (unsigned int)b;
+  uint64_t b_hi = b >> 32;
+  uint64_t m1 = a_lo * b_hi;
+  uint64_t m2 = a_hi * b_lo;
+  unsigned int           carry;
 
-    // The loop is unrolled, since each P pair is in a different register.
-    // The first square is just 2^-1*2^-1 = (2^-1)/2.
-    // So do that without a mulmod.
-    // The first bit should be checked, too.
-    if (n & x) {
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp0, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      for(i=0; i < 2; ++i) {
-        //k0 += (k0 % 2)?p0:0;
-        mtemp = _mm_and_si128(mk, mones);	// (mk % 2)
-        mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-        mtemp = _mm_andnot_si128(mtemp, mp0);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-        mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-        //k0 /= 2;
-        mk = _mm_srli_epi64(mk, 1);
-      }
-      _mm_store_si128((__m128i*)(&K[0]), mk);
+  carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
 
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp1, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      for(i=0; i < 2; ++i) {
-        //k0 += (k0 % 2)?p0:0;
-        mtemp = _mm_and_si128(mk, mones);	// (mk % 2)
-        mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-        mtemp = _mm_andnot_si128(mtemp, mp1);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-        mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-        //k0 /= 2;
-        mk = _mm_srli_epi64(mk, 1);
-      }
-      _mm_store_si128((__m128i*)(&K[2]), mk);
-
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp2, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      for(i=0; i < 2; ++i) {
-        //k0 += (k0 % 2)?p0:0;
-        mtemp = _mm_and_si128(mk, mones);	// (mk % 2)
-        mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-        mtemp = _mm_andnot_si128(mtemp, mp2);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-        mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-        //k0 /= 2;
-        mk = _mm_srli_epi64(mk, 1);
-      }
-      _mm_store_si128((__m128i*)(&K[4]), mk);
-    } else {
-      // Same thing, but only divides by 2 twice.
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp0, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      //k0 += (k0 % 2)?p0:0;
-      mtemp = _mm_and_si128(mk, mones);		// (mk % 2)
-      mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-      mtemp = _mm_andnot_si128(mtemp, mp0);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-      mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-      //k0 /= 2;
-      mk = _mm_srli_epi64(mk, 1);
-      _mm_store_si128((__m128i*)(&K[0]), mk);
-
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp1, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      //k0 += (k0 % 2)?p0:0;
-      mtemp = _mm_and_si128(mk, mones);		// (mk % 2)
-      mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-      mtemp = _mm_andnot_si128(mtemp, mp1);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-      mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-      //k0 /= 2;
-      mk = _mm_srli_epi64(mk, 1);
-      _mm_store_si128((__m128i*)(&K[2]), mk);
-
-      //k0 = (p0+1)/2
-      mk = _mm_add_epi64(mp2, mones);
-      mk = _mm_srli_epi64(mk, 1);
-      //k0 += (k0 % 2)?p0:0;
-      mtemp = _mm_and_si128(mk, mones);		// (mk % 2)
-      mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-      mtemp = _mm_andnot_si128(mtemp, mp2);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-      mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-      //k0 /= 2;
-      mk = _mm_srli_epi64(mk, 1);
-      _mm_store_si128((__m128i*)(&K[4]), mk);
-    }
-  }   // Discard the cached P values in the SSE2 registers.
-#else
-  // Just initialize it straight up.
-  x = 1U << (31 - __builtin_clz(n));
+  return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
+}
 #endif
 
-  while ((x >>= 1) > 0)
-  {
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(1)\n\t"
-         "fistpll %0"
-         : "=m" (T[0]) : "m" (K[0]) );
+/*  BEGIN REDC CODE  */
 
-#if (APP_BUFLEN >= 2)
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(2)\n\t"
-         "fistpll %0"
-         : "=m" (T[1]) : "m" (K[1]) );
-#endif
-#if (APP_BUFLEN >= 3)
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(3)\n\t"
-         "fistpll %0"
-         : "=m" (T[2]) : "m" (K[2]) );
-#endif
-#if (APP_BUFLEN >= 4)
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(4)\n\t"
-         "fistpll %0"
-         : "=m" (T[3]) : "m" (K[3]) );
-#endif
-#if (APP_BUFLEN >= 5)
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(5)\n\t"
-         "fistpll %0"
-         : "=m" (T[4]) : "m" (K[4]) );
-#endif
-#if (APP_BUFLEN >= 6)
-    asm ("fildll %1\n\t"
-         "fmul %%st(0)\n\t"
-         "fmul %%st(6)\n\t"
-         "fistpll %0"
-         : "=m" (T[5]) : "m" (K[5]) );
-#endif
-#if (APP_BUFLEN >= 7)
-    for (i = 6; i < APP_BUFLEN; i++)
-      asm ("fldt %2\n\t"
-           "fildll %1\n\t"
-           "fmul %%st(0)\n\t"
-           "fmulp\n\t"
-           "fistpll %0"
-           : "=m" (T[i]) : "m" (K[i]), "m" (INV[i-6]) );
-#endif
+uint64_t invmod2pow_ul (const uint64_t n)
+{
+  uint64_t r;
+  //unsigned int ir;
+  const unsigned int in = (unsigned int)n;
 
-#ifdef __x86_64__
-    /* A correction is required more often as P[i] increases, but no more
-       than about 1 time in 8 on average, even for the largest P[i]. */
-    for (i = 0; i < APP_BUFLEN; i++)
-      if (__builtin_expect(((K[i] = K[i]*K[i] - T[i]*P[i]) >= P[i]),0))
-        K[i] -= P[i];
+  //ASSERT (n % 2UL != 0UL);
+  
+  // Suggestion from PLM: initing the inverse to (3*n) XOR 2 gives the
+  // correct inverse modulo 32, then 3 (for 32 bit) or 4 (for 64 bit) 
+  // Newton iterations are enough.
+  r = (n+n+n) ^ ((uint64_t)2);
+  // Newton iteration
+  r += r - (unsigned int) r * (unsigned int) r * in;
+  r += r - (unsigned int) r * (unsigned int) r * in;
+  r += r - (unsigned int) r * (unsigned int) r * in;
+  r += r - r * r * n;
 
-    if (n & x)
-    {
-      for (i = 0; i < APP_BUFLEN; i++)
-      {
-        K[i] += (K[i] % 2)? P[i] : 0; /* Unpredictable */
-        K[i] /= 2;
-      }
-    }
-#else
-#ifdef EMM // 32-bit SSE2 code for K^2-TP
-    if (n & x)
-    {
-      for (i = 0; i < APP_BUFLEN; i+=2) {
-        register __m128i mt, mtemp, mtemp2;
-        register __m128i mk = _mm_load_si128((__m128i*)(&K[i]));
-        register __m128i mp = _mm_load_si128((__m128i*)(&P[i])); // Slip this in the latency.
-        // K * K
-        mtemp = _mm_srli_epi64(mk, 32);		// Get the high doubleword.
-        mtemp = _mm_mul_epu32(mtemp, mk);
-        mk = _mm_mul_epu32(mk, mk);
-        mt = _mm_load_si128((__m128i*)(&T[i]));	// Slip this in the latency.
-        mtemp = _mm_slli_epi64(mtemp, 33);	// Move result to other column, multiply by 2.
-        mk = _mm_add_epi32(mk, mtemp);		// Add the results; only need high doublewords.
-        // T * P
-        mtemp = _mm_srli_epi64(mp, 32);		// Get the high doubleword.
-        mtemp2 = _mm_srli_epi64(mt, 32);	// Get the high doubleword.
-        mtemp = _mm_mul_epu32(mtemp, mt);
-        mtemp2 = _mm_mul_epu32(mtemp2, mp);
-        mt = _mm_mul_epu32(mt, mp);
-        mtemp = _mm_add_epi32(mtemp, mtemp2);	// Just need the low doublewords.
-        mtemp = _mm_slli_epi64(mtemp, 32);	// Move result to other column (high doublewords).
-        mt = _mm_add_epi32(mt, mtemp);		// Add the results; only need high doublewords.
-        // K*K-T*P
-        mk = _mm_sub_epi64(mk, mt);
-        // In case of (n & x), do the divide by two here.
-        //k0 += (k0 % 2)?p0:0;
-        mtemp = _mm_and_si128(mk, mones);	// (mk % 2)
-        mtemp = _mm_sub_epi64(mtemp, mones);	// 1 goes to 0; 0 goes to FFFFFFFFFFFFFFFF.
-        mtemp = _mm_andnot_si128(mtemp, mp);	// mp if mk%2 == 1; 0 if mk%2 == 0.
-        mk = _mm_add_epi64(mk, mtemp);		// mk += the result.
-        //k0 /= 2;
-        mk = _mm_srli_epi64(mk, 1);
-        _mm_store_si128((__m128i*)(&K[i]), mk);
-        mk = _mm_sub_epi64(mk, mp);     // Negative iff K[i] < P[i]
-        unsigned int bits = _mm_movemask_epi8(mk);
-        if((bits & 0x80) == 0) K[i] -= P[i];
-        if((bits & 0x8000) == 0) K[i+1] -= P[i+1];
-      }
-    } else {
-      for (i = 0; i < APP_BUFLEN; i+=2) {
-        register __m128i mt, mtemp, mtemp2;
-        register __m128i mk = _mm_load_si128((__m128i*)(&K[i]));
-        register __m128i mp = _mm_load_si128((__m128i*)(&P[i])); // Slip this in the latency.
-        mtemp = _mm_srli_epi64(mk, 32);
-        mtemp = _mm_mul_epu32(mtemp, mk);
-        mk = _mm_mul_epu32(mk, mk);
-        mt = _mm_load_si128((__m128i*)(&T[i])); // Slip this in the latency.
-        mtemp = _mm_slli_epi64(mtemp, 33); // Move result to other column, multiply by 2.
-        mk = _mm_add_epi32(mk, mtemp);  // Add the results; only need high doublewords.
-        mtemp = _mm_srli_epi64(mp, 32);
-        mtemp2 = _mm_srli_epi64(mt, 32);
-        mtemp = _mm_mul_epu32(mtemp, mt);
-        mtemp2 = _mm_mul_epu32(mtemp2, mp);
-        mt = _mm_mul_epu32(mt, mp);
-        mtemp = _mm_add_epi32(mtemp, mtemp2); // Just need the low doublewords.
-        mtemp = _mm_slli_epi64(mtemp, 32); // Move result to other column (high doublewords).
-        mt = _mm_add_epi32(mt, mtemp);  // Add the results; only need high doublewords.
-        mk = _mm_sub_epi64(mk, mt);
-        // In case of (n & x), do the divide by two here; This is not that case.
-        _mm_store_si128((__m128i*)(&K[i]), mk);
-        mk = _mm_sub_epi64(mk, mp);     // Negative iff K[i] < P[i]
-        unsigned int bits = _mm_movemask_epi8(mk);
-        if((bits & 0x80) == 0) K[i] -= P[i];
-        if((bits & 0x8000) == 0) K[i+1] -= P[i+1];
-      }      
-    }
-#else // 32-bit only code for K^2-TP
-    for (i = 0; i < APP_BUFLEN; i++)
-      if (__builtin_expect(((K[i] = K[i]*K[i] - T[i]*P[i]) >= P[i]),0))
-        K[i] -= P[i];
-
-    if (n & x)
-    {
-      for (i = 0; i < APP_BUFLEN; i++)
-        // This should force use of the CMOV instruction.
-        // It's faster than a compare when K[i]%2 is random.
-        K[i] += (((unsigned int)K[i]) & 1)?P[i]:0;
-      // When dealing directly with memory, leave the memory
-      // latency time to get assigned before re-reading it.
-      for (i = 0; i < APP_BUFLEN; i++)
-        K[i] /= 2;
-    }
-#endif
-#endif
-  }
-
-#if (APP_BUFLEN <= 6)
-  for (i = 0; i < APP_BUFLEN; i++)
-    asm volatile ("fstp %st(0)");
-#else
-  for (i = 0; i < 6; i++)
-    asm volatile ("fstp %st(0)");
-#endif
-  //fprintf(stderr, "K setup successful.\n");
+  return r;
 }
 
-void check_factors_found(const int th, const uint64_t *__attribute__((aligned(16))) P, const unsigned int cthread_count) {
+uint64_t mulmod_REDC (const uint64_t a, const uint64_t b, 
+             const uint64_t N, const uint64_t Ns)
+{
+  uint64_t rax, rcx;
+
+  // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+  rax = a*b;
+  rcx = __umul64hi(a,b);
+  rax *= Ns;
+  rcx += (rax!=0)?1:0;
+  rax = __umul64hi(rax, N);
+  rax += rcx;
+  rcx = rax - N;
+  rax = (rax>N)?rcx:rax;
+
+#ifdef DEBUG64
+  if (longmod (rax, 0, N) != mulmod(a, b, N))
+  {
+    fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
+    bexit(1);
+  }
+#endif
+
+  return rax;
+}
+
+// mulmod_REDC(1, 1, N, Ns)
+// But note that mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
+uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
+  uint64_t rcx;
+
+  // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+  rcx = (rax!=0)?1:0;
+  rax = __umul64hi(rax, N) + rcx;
+  rcx = rax - N;
+  rax = (rax>N)?rcx:rax;
+
+  return rax;
+}
+
+// Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
+uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) {
+  return onemod_REDC(N, Ns*a);
+}
+
+// Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+// rax is passed in as a * Ns.
+uint64_t shiftmod_REDC (const uint64_t a, 
+             const uint64_t N, uint64_t rax)
+{
+  uint64_t rcx;
+  unsigned int d_mont_nstep = 64-ld_nstep;
+
+  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rcx = a >> ld_nstep;
+  rcx += (rax!=0)?1:0;
+  rax = __umul64hi(rax, N) + rcx;
+  rcx = rax - N;
+  rax = (rax>N)?rcx:rax;
+
+#ifdef DEBUG64
+  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
+  {
+    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    bexit(1);
+  }
+#endif
+
+  return rax;
+}
+
+// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
+/* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
+uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
+  uint64_t r;
+  int bbits = ld_bbits;
+
+  r = ld_r0;
+
+  // Now work through the other bits of nmin.
+  for(; bbits >= 0; --bbits) {
+    //if(N == 42070000070587) printf("r = %lu (CPU)\n", r);
+    // Just keep squaring r.
+    r = mulmod_REDC(r, r, N, Ns);
+    // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
+    if(nmin & (1u << bbits)) {
+      r += (r&1)?N:0;
+      r >>= 1;
+    }
+  }
+
+#ifdef DEBUG64
+  //assert (mod_REDC (r, N, Ns) == invmod(powmod (d_nmin, N), N));
+#endif
+
+  // Convert back to standard.
+  //r = mod_REDC (r, N, Ns);
+
+  return r;
+}
+
+void test_one_p(const uint64_t my_P) {
+  unsigned int n = nmin; // = nmin;
   unsigned int i;
-  uint64_t K[APP_BUFLEN];
+  uint64_t k0, kPs;
+  uint64_t kpos;
+  uint64_t Ps;
+  int cands_found = 0;
+  
+  // Better get this done before the first mulmod.
+  Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+  
+  // Calculate k0, in Montgomery form.
+  k0 = invpowmod_REDClr(my_P, Ps);
+
+  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (CPU)\n", my_P, Ps);
+  /*
+  // Verify the first result.
+  kpos = 1;
+  for(i=0; i < nmin; i++) {
+      kpos += (kpos&1)?my_P:0;
+      kpos >>= 1;
+  }
+  kPs = k0 * Ps;
+  assert(kpos == onemod_REDC(my_P, kPs));
+  if(kpos != onemod_REDC(my_P, kPs)) {
+    fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
+    //bexit(1);
+  } */
+
+  if(search_proth) k0 = my_P-k0;
+
+  do { // Remaining steps are all of equal size nstep
+    // Get K from the Montgomery form.
+    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    kPs = k0 * Ps;
+    kpos = onemod_REDC(my_P, kPs);
+    i = __builtin_ctzll(kpos);
+    //i = __ffsll(kpos)-1;
+
+    kpos >>= i;
+    if (kpos <= kmax && kpos >= kmin) {
+      cands_found++;
+      if (i < nstep)
+        test_factor(my_P,kpos,n+i,+1);
+    }
+
+    // Proceed to the K for the next N.
+    k0 = shiftmod_REDC(k0, my_P, kPs);
+    n += ld_nstep;
+  } while (n < nmax);
+  if(cands_found == 0) {
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
+#ifdef USE_BOINC
+    bexit(1);
+#endif
+  }
+}
+
+inline void check_factors_found(const int th, const uint64_t *__attribute__((aligned(16))) P, const unsigned int cthread_count) {
+  unsigned int i;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
   for(i=0; i < cthread_count; i++) {
     if(factor_found[th][i]) {
-      // Initialize this K.
-      if(i >= cthread_count-APP_BUFLEN) {
-        init_ks(&P[cthread_count-APP_BUFLEN], K);
-        test_one_p(P[i], K[i+APP_BUFLEN-cthread_count], th);
-      } else {
-        init_ks(&P[i&(-2)], K);
-        test_one_p(P[i], K[i&1], th);
-      }
+      // Test that P.
+      test_one_p(P[i]);
     }
   }
 
@@ -1213,10 +1045,10 @@ void app_fini(void)
     free(bitmap);
     bitmap = NULL;
   }
-  for(i=0; i < num_threads; i++) {
-    free(bitsskip[i]);
-  }
-  free(bitsskip);
+  //for(i=0; i < num_threads; i++) {
+    //free(bitsskip[i]);
+  //}
+  //free(bitsskip);
   for(i=0; i < num_threads; i++) {
     if(factor_found[i] != NULL) free(factor_found[i]);
   }
