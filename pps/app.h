@@ -1,5 +1,5 @@
 /* app.h -- (C) Geoffrey Reynolds, April 2009.
- * and Ken Brazier October 2009.
+ * and Ken Brazier October 2009 - April 2010.
 
    Proth Prime Search sieve.
 
@@ -16,7 +16,7 @@
 #include <stdint.h>
 
 
-#define APP_VERSION "cuda-0.1.1-rc1"
+#define APP_VERSION "cuda-0.1.1-rc2"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
