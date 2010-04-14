@@ -16,7 +16,7 @@
 #include "putil.h"
 
 #ifdef USE_BOINC
-#include "boinc_api.h"
+#include "BOINC/boinc_api.h"
 #endif
 
 void *xmalloc(size_t size)

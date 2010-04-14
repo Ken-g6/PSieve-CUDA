@@ -5,7 +5,7 @@ appname=ppsieve-cuda
 #cleanvars="-s"
 # To build the BOINC Linux 64 version, get and make BOINC from subversion.  Place its directory location below.
 #BOINC_DIR=/downloads/distributed/boinc610/server_stable
-BOINC_DIR=../../ppsb/boinc
+#BOINC_DIR=../../ppsb/boinc
 BOINC_API_DIR=$BOINC_DIR/api
 BOINC_LIB_DIR=$BOINC_DIR/lib
 arch=`uname -m`

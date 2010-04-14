@@ -45,11 +45,7 @@
 #include "appcu.h"
 #ifdef USE_BOINC
 #ifdef _WIN32                //  Stuff we only need on Windows: 
-#include "boinc_win.h"
-#include "util.h"            // parse_command_line(), boinc_sleep()
-#include "str_util.h"        // for parse_command_line()
-#endif
-#ifdef MSVC
+#include "BOINC/boinc_win.h"
 #define getThreadPriority() GetThreadPriority(GetCurrentThread())
 #define setThreadPriority(num) SetThreadPriority(GetCurrentThread(), num)
 #else
@@ -59,9 +55,10 @@
 
 /* BOINC API */
 
-#include "boinc_api.h"
-#include "diagnostics.h"     // boinc_init_diagnostics()
-#include "filesys.h"         // boinc_fopen(), etc...
+#include "BOINC/boinc_api.h"
+#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
+// Note: filesys.h has some improperly #ifdef-ed C++ #includes, when building on Win32 with MinGW/MSys.
+#include "BOINC/filesys.h"         // boinc_fopen(), etc...
 #endif
 
 /* Global variables
@@ -847,7 +844,7 @@ int main(int argc, char *argv[])
       BOINC_DIAG_DUMPCALLSTACKENABLED| 
       BOINC_DIAG_TRACETOSTDERR);
 
-  boincordie(boinc_init_parallel(), "BOINC initialization failed!\n");
+  boincordie(boinc_init(), "BOINC initialization failed!\n");
 #endif
   program_start_time = elapsed_usec();
   app_banner();

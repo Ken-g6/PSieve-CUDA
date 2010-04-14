@@ -20,11 +20,11 @@
 
 #define MAX_THREADS 32  /* Excluding parent thread */
 
-#define BLOCKSIZE_OPT_DEFAULT 32768  /* Bytes per sieve block */
+#define BLOCKSIZE_OPT_DEFAULT 524288  /* Bytes per sieve block */
 #define BLOCKSIZE_OPT_MIN 1024
 #define BLOCKSIZE_OPT_MAX (1<<27)  /* 128Mb = 2^30 bits */
 
-#define CHUNKSIZE_OPT_DEFAULT 128  /* Bytes per sieve chunk */
+#define CHUNKSIZE_OPT_DEFAULT 16384  /* Bytes per sieve chunk */
 #define CHUNKSIZE_OPT_MIN 16
 #define CHUNKSIZE_OPT_MAX (1<<19)  /* 128Kb = 2^20 bits */
 
