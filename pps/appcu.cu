@@ -410,19 +410,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   return rax;
 }
 
-// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
-/* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
-// From NewPGen: NewPGen is much faster if the base is 2. This is because division by 2 modulo a prime is easy (you shift it right if it is even, otherwise you add the prime then shift it). Division by other bases isn't so straightforward, however.
-// This function takes the modular inverse of 2 mod P, then exponentiates.  2^-1 mod P = (P+1)/2
-// The other thing about this is that when you cross 2^-1 mod N with Montgomery multiplication,
-// 2^-32 * 2^64 (mod N) = 2^32 (mod N).  So that kills the last mod if N > 2^32.
-// This version runs two N's at once.
-// Doing two or more invmod2pow_ul's at once is a little faster.
-// Doing two mulmod_REDCs at once is even a little faster.
-// This program works with K*2^N, N constant == d_nmin.
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
-
-
 __device__ uint64_t
 invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   uint64_t r;

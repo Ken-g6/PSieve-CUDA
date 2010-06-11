@@ -7,7 +7,7 @@
    the Free Software Foundation; either version 2 of the License, or
    (at your option) any later version.
 */
-#ifndef NDEBUG
+#ifdef TRACE
 #include <stdio.h>
 #endif
 #include <unistd.h>
@@ -30,7 +30,7 @@ cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaM
 	uint64_t start_t, busy_wait_t;
 
 	// First, sleep as long as seemed a good idea last time.
-#ifndef NDEBUG
+#ifdef TRACE
 	fprintf(stderr, "Sleeping %d usec.\n", *delay);
 #endif
 	usleep(*delay);
@@ -51,7 +51,7 @@ cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaM
 	// Can't sleep less than 0 seconds.
 	if(*delay < 0) *delay = 0;
 
-#ifndef NDEBUG
+#ifdef TRACE
 	fprintf(stderr, "Will sleep %d usec next time.\n", *delay);
 #endif
 #endif
@@ -70,6 +70,10 @@ cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaM
 // * Overlap is time that CUDA should busy-wait, in usec.
 //   Larger overlaps recover from extra-long kernel calls more quickly,
 //   but they use more CPU all other times.
+//
+// * Start_t is the time the kernel was started, retrieved from
+//   elapsed_usec().
+
 cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap, const uint64_t start_t) {
 	cudaError_t ret;
 #ifndef BUSYWAIT
@@ -77,14 +81,14 @@ cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, en
 	int busy_wait_t;
 
 	// First, sleep as long as seemed a good idea last time.
-#ifndef NDEBUG
+#ifdef TRACE
 	fprintf(stderr, "Sleeping %d usec.\n", *delay);
 #endif
 	// Figure out how much time is left before a result is expected.
 	if(*delay > 0) {
 		busy_wait_t = *delay - (int)(elapsed_usec()-start_t);
 		// Sleep that long.
-		usleep(busy_wait_t);
+		if(busy_wait_t > 0) usleep(busy_wait_t);
 	}
 
 	// Now, time the busy-wait.
@@ -100,7 +104,7 @@ cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, en
 	// Can't sleep less than 0 seconds.
 	if(*delay < 0) *delay = 0;
 
-#ifndef NDEBUG
+#ifdef TRACE
 	fprintf(stderr, "Will sleep %d usec next time.\n", *delay);
 #endif
 #endif

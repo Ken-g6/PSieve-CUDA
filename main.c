@@ -1,6 +1,6 @@
 /* ex: set softtabstop=2 shiftwidth=2 expandtab: */
 /* main.c -- (C) Geoffrey Reynolds, March 2009.
- * and some  (C) Ken Brazier, October 2009.
+ * and some  (C) Ken Brazier, October 2009-June 2010.
 
    Multithreaded sieve application for algorithms of the form:
 
@@ -18,11 +18,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
-#include <inttypes.h>
+#include "stdint.h"
+#include "inttypes.h"
 #include <signal.h>
 #include <math.h>
-#include <getopt.h>
+#include "getopt.h"
 #include <time.h>
 
 #ifdef _WIN32
@@ -124,13 +124,6 @@ static pthread_mutex_t exiting_mutex;
 static pthread_cond_t exiting_cond;
 static sem_t checkpoint_semaphoreA;
 static sem_t checkpoint_semaphoreB;
-#endif
-
-#ifndef _GNU_SOURCE
-static int asprintf(char **out, const char *fmt, const char *str) {
-  *out = xmalloc(strlen(fmt)+strlen(str)-1);
-  return sprintf(*out, fmt, str);
-}
 #endif
 
 static void handle_signal(int signum)
@@ -421,7 +414,7 @@ static int parse_option(int opt, char *arg, const char *source)
   switch (opt)
   {
     case 'p':
-      pmin_str = arg;
+      astrcpy(&pmin_str, arg);
       status = parse_uint64(&pmin,arg,3,PMAX_MAX-1);
       break;
 
@@ -698,14 +691,14 @@ static void *thread_fun(void *arg)
   cthread_count = app_thread_init(th);
   if(cthread_count > 0) {
     // Create the P array, to match the number of CUDA threads.
-    P0 = xmalloc((cthread_count+2)*sizeof(uint64_t));
+    P0 = (uint64_t*)xmalloc((cthread_count+2)*sizeof(uint64_t));
     P1 = (unsigned char*)P0;
     while((((unsigned long)P1) & 15) != 0) P1++; /* set stack alignment */
     P = (uint64_t*) P1;
     //fprintf(stderr,"Malloc 1 done.\n",th);
 
     // Create the K array, to match the P array.
-    K0 = xmalloc((cthread_count+2)*sizeof(uint64_t));
+    K0 = (uint64_t*)xmalloc((cthread_count+2)*sizeof(uint64_t));
     P1 = (unsigned char*)K0;
     while((((unsigned long)P1) & 15) != 0) P1++; /* set stack alignment */
     K = (uint64_t*) P1;
@@ -772,6 +765,11 @@ static void *thread_fun(void *arg)
         printf("Thread %d: Continuing after checkpoint\n",th);
 #endif
       }
+#ifdef TRACE
+      else {
+        printf("Thread %d: Not checkpointing.\n",th);
+	  }
+#endif
     }
 
     app_thread_fun1(th,P,K,cthread_count,plen);
@@ -905,7 +903,7 @@ int main(int argc, char *argv[])
   }
 
   if ((uint64_t)qmax*qmax > pmax)
-    qmax = sqrt(pmax);
+    qmax = sqrt((double)pmax);
   init_sieve_primes(qmax);
 
   app_init();
@@ -1027,21 +1025,23 @@ int main(int argc, char *argv[])
 
     /* Wait until timeout, or some child thread exits. */
 #ifdef _WIN32
-    DWORD timeout_interval = (DWORD)(timeout - current_time+999)/1000;
-    /* Wait for any thread */
-    if (WaitForMultipleObjects(num_threads,tid,0,timeout_interval)
-        == WAIT_OBJECT_0)
     {
-      /* Find which thread exited */
-      for (th = 0; th < num_threads; th++)
-        if (WaitForSingleObject(tid[th],0) == WAIT_OBJECT_0)
-        {
-          /* If this thread failed, stop the others too. */
-          if (GetExitCodeThread(tid[th],&thread_ret) && thread_ret != 0)
-            stopping = 1;
-          break;
-        }
-      break;
+      DWORD timeout_interval = (DWORD)(timeout - current_time+999)/1000;
+      /* Wait for any thread */
+      if (WaitForMultipleObjects(num_threads,tid,0,timeout_interval)
+          == WAIT_OBJECT_0)
+      {
+        /* Find which thread exited */
+        for (th = 0; th < num_threads; th++)
+          if (WaitForSingleObject(tid[th],0) == WAIT_OBJECT_0)
+          {
+            /* If this thread failed, stop the others too. */
+            if (GetExitCodeThread(tid[th],&thread_ret) && thread_ret != 0)
+              stopping = 1;
+            break;
+          }
+        break;
+      }
     }
 #else
     struct timespec wait_timespec;
@@ -1154,27 +1154,28 @@ int main(int argc, char *argv[])
   }
 
   /* Print statistics for this run */
-  uint64_t stop_time = elapsed_usec();
-  uint64_t stop_processor_time = processor_usec();
-  fprintf(stderr,"%sElapsed time: %.2f sec. (%.2f init + %.2f sieve)"
-          " at %.0f p/sec.\n", bmprefix(),
-          (stop_time-program_start_time)/1000000.0,
-          (sieve_start_time-program_start_time)/1000000.0,
-          (stop_time-sieve_start_time)/1000000.0,
-          (double)(pstop-pstart)/(stop_time-sieve_start_time)*1000000);
-  fprintf(stderr,"%sProcessor time: %.2f sec. (%.2f init + %.2f sieve)"
-          " at %.0f p/sec.\n", bmprefix(),
-          (stop_processor_time)/1000000.0,
-          (sieve_start_processor_time)/1000000.0,
-          (stop_processor_time-sieve_start_processor_time)/1000000.0,
-          (double)(pstop-pstart)/(stop_processor_time-sieve_start_processor_time)*1000000);
-  fprintf(stderr,"%sAverage processor utilization: %.2f (init), %.2f (sieve)\n",
-          bmprefix(),
-          (double)(sieve_start_processor_time)
-          /(sieve_start_time-program_start_time),
-          (double)(stop_processor_time-sieve_start_processor_time)
-          /(stop_time-sieve_start_time));
-
+  {
+    uint64_t stop_time = elapsed_usec();
+    uint64_t stop_processor_time = processor_usec();
+    fprintf(stderr,"%sElapsed time: %.2f sec. (%.2f init + %.2f sieve)"
+        " at %.0f p/sec.\n", bmprefix(),
+        (stop_time-program_start_time)/1000000.0,
+        (sieve_start_time-program_start_time)/1000000.0,
+        (stop_time-sieve_start_time)/1000000.0,
+        (double)(pstop-pstart)/(stop_time-sieve_start_time)*1000000);
+    fprintf(stderr,"%sProcessor time: %.2f sec. (%.2f init + %.2f sieve)"
+        " at %.0f p/sec.\n", bmprefix(),
+        (stop_processor_time)/1000000.0,
+        (sieve_start_processor_time)/1000000.0,
+        (stop_processor_time-sieve_start_processor_time)/1000000.0,
+        (double)(pstop-pstart)/(stop_processor_time-sieve_start_processor_time)*1000000);
+    fprintf(stderr,"%sAverage processor utilization: %.2f (init), %.2f (sieve)\n",
+        bmprefix(),
+        (double)(sieve_start_processor_time)
+        /(sieve_start_time-program_start_time),
+        (double)(stop_processor_time-sieve_start_processor_time)
+        /(stop_time-sieve_start_time));
+  }
   boinc_finish(process_ret);
   return process_ret;
 }

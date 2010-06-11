@@ -7,12 +7,15 @@
    (at your option) any later version.
 */
 
-#include <assert.h>
+//#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
+#include "stdint.h"
 #include <string.h>
+#ifndef __GNUC__
+#include <intrin.h>
+#endif
 #include "putil.h"
 
 #ifdef USE_BOINC
@@ -162,3 +165,29 @@ int parse_uint64(uint64_t *result, const char *str,
   *result = num;
   return 0;
 }
+
+#ifndef _GNU_SOURCE
+int asprintf(char **out, const char *fmt, const char *str) {
+  *out = (char *)xmalloc(strlen(fmt)+strlen(str)-1);
+  return sprintf(*out, fmt, str);
+}
+#endif
+
+// Allocate and copy string.
+char* astrcpy(char **dest, const char *src) {
+  *dest = (char *)xmalloc(strlen(src)+1);
+  return strcpy(*dest, src);
+}
+
+#ifndef __GNUC__
+unsigned long __builtin_ctzll(unsigned __int64 i) {
+	unsigned long res;
+	if((unsigned int)i) {
+		_BitScanForward(&res, (unsigned int)i);
+		return res;
+	} else {
+		_BitScanForward(&res,(unsigned int)(i>>32));
+		return res+32;
+	}
+}
+#endif
