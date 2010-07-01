@@ -13,12 +13,12 @@
 #include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
-#include <assert.h>
+#include <cuda.h>
+//#include <assert.h>
 #include "main.h"
 #include "putil.h"
 #include "app.h"
 #include "appcu.h"
-#include "cuda_sleep_memcpy.h"
 
 #define INLINE static inline
 /*
@@ -26,8 +26,6 @@
 #define BITSATATIME 4
 #endif
 #define BITSMASK ((1<<BITSATATIME)-1)*/
-// BLOCKSIZE should be a power of two for greatest efficiency.
-#define BLOCKSIZE 128
 /*
 #if(BITSATATIME == 3)
   #define SHIFT_CAST unsigned int
@@ -52,6 +50,7 @@ __constant__ uint64_t d_kmin;
 __constant__ unsigned int d_nmin;
 __constant__ unsigned int d_nmax;
 __constant__ unsigned int d_nstep;
+__constant__ unsigned int d_kernel_nstep;
 __constant__ unsigned int d_search_proth;
 
 __constant__ int d_bbits;
@@ -59,13 +58,15 @@ __constant__ unsigned int d_mont_nstep;
 __constant__ uint64_t d_r0;
 // Device arrays
 uint64_t *d_P;
-//uint64_t *d_K;
-//uint64_t *d_bitsskip;
+uint64_t *d_Ps, *d_K;
+//unsigned int *d_N;
 unsigned char *d_factor_found;
 
 // Timing variables:
 //const int setup_ps_overlap = 5000;
-const int check_ns_overlap = 50000;
+//const int check_ns_overlap = 50000;
+
+static unsigned int ld_kernel_nstep;
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -77,7 +78,26 @@ int lg2(uint64_t v) {
 	}
 	return r;
 }
+#ifndef _DEVICEEMU
+bool SetCUDABlockingSync(int device) {
+    CUdevice  hcuDevice;
+    CUcontext hcuContext;
 
+    CUresult status = cuInit(0);
+    if(status != CUDA_SUCCESS)
+       return false;
+
+    status = cuDeviceGet( &hcuDevice, device);
+    if(status != CUDA_SUCCESS)
+       return false;
+
+    status = cuCtxCreate( &hcuContext, 0x4, hcuDevice );
+    if(status != CUDA_SUCCESS)
+       return false;
+
+    return true;
+}
+#endif
 /* This function is called once before any threads are started.
  */
 unsigned int cuda_app_init(int gpuno)
@@ -90,6 +110,9 @@ unsigned int cuda_app_init(int gpuno)
   //unsigned int ld_bpernstep;
   unsigned int cthread_count;
 
+#ifndef _DEVICEEMU
+  SetCUDABlockingSync(gpuno);
+#endif
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
@@ -126,22 +149,29 @@ unsigned int cuda_app_init(int gpuno)
   // TODO: fix this awkward construct.
   while(1) {
     // - d_bitsskip[] (Biggest array first.)
-    // Not using cudaMallocPitch because coalescing isn't possible in general.
     //if(cudaMalloc((void**)&d_bitsskip, ld_bitsmask*cthread_count*sizeof(uint64_t)) == cudaSuccess) {
       // - P's
       if(cudaMalloc((void**)&d_P, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-        // - K's
-        //if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-          // - d_factor_found[]
-          if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
+        // - Ps's
+        if(cudaMalloc((void**)&d_Ps, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+          // - K's
+          if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+            // - N's
+            //if(cudaMalloc((void**)&d_N, cthread_count*sizeof(unsigned int)) == cudaSuccess) {
+              // - d_factor_found[]
+              if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
 #ifndef NDEBUG
-            //fprintf(stderr, "Allocation successful!\n");
-            //fprintf(stderr, "ld_bitsatatime = %u\n", ld_bitsatatime);
+                fprintf(stderr, "Allocation successful!\n");
+                fprintf(stderr, "ld_bitsatatime = %u\n", ld_bitsatatime);
 #endif
-            break;  // Allocation successful!
+                break;  // Allocation successful!
+              }
+			  //cudaFree(d_N);
+			//}
+            cudaFree(d_K);
           }
-          //cudaFree(d_K);
-        //}
+          cudaFree(d_Ps);
+        }
         cudaFree(d_P);
       }
       //cudaFree(d_bitsskip);
@@ -180,20 +210,18 @@ unsigned int cuda_app_init(int gpuno)
   i = 64-ld_nstep;
   cudaMemcpyToSymbol(d_mont_nstep, &i, sizeof(i));
   cudaMemcpyToSymbol(d_r0, &ld_r0, sizeof(ld_r0));
-
-  // The following would be "pitch" if using cudaMallocPitch above.
-  //i = ld_bitsmask+1;
-  ////cudaMemcpyToSymbol(d_len, &i, sizeof(i));//=(1<<bitsatatime); 
-  // But the following would not.
-  //i >>= 1;
-  //cudaMemcpyToSymbol(d_halflen, &i, sizeof(i));//=(1<<bitsatatime)/2; 
+  // N's to search each time a kernel is run:
+  ld_kernel_nstep = ITERATIONS_PER_KERNEL * ld_nstep;
+  // Adjust for differing block sizes.
+  ld_kernel_nstep *= 384;
+  ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
+  cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
   cudaMemcpyToSymbol(d_kmin, &kmin, sizeof(kmin));
-  //cudaMemcpyToSymbol(d_bpernstep, &ld_bpernstep, sizeof(ld_bpernstep));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
   cudaMemcpyToSymbol(d_nmax, &nmax, sizeof(nmax));
   cudaMemcpyToSymbol(d_nstep, &ld_nstep, sizeof(ld_nstep));
-  i = (search_proth == 1)?1:0;
+  i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
   cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
 
 
@@ -439,27 +467,17 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   return r;
 }
 
-// Check all N's.
-__global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
-  unsigned int n = d_nmin; // = nmin;
-  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0, kPs;
-  uint64_t kpos;
-  unsigned char my_factor_found = 0;
-  uint64_t my_P, Ps;
-  my_P = P[i];
-  
-  // Better get this done before the first mulmod.
-  Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
-  
-  // Calculate k0, in Montgomery form.
-  k0 = invpowmod_REDClr(my_P, Ps);
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+__device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+								unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
 
-  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, Ps);
-
-  if(d_search_proth) k0 = my_P-k0;
-
-  my_factor_found = 0;
+#ifdef _DEVICEEMU
+  if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
@@ -476,8 +494,8 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
 
     kpos >>= i;
     if (kpos <= d_kmax) {
-#ifndef NDEBUG
-      fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#ifdef _DEVICEEMU
+    //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
       if(kpos >= d_kmin) my_factor_found = 1;
@@ -487,12 +505,65 @@ __global__ void d_check_ns(const uint64_t *P, unsigned char *factor_found_arr) {
     // kPs is destroyed, just to keep the register count down.
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += d_nstep;
-  } while (n < d_nmax);
-  factor_found_arr[blockIdx.x * BLOCKSIZE + threadIdx.x] = my_factor_found;
+  } while (n < l_nmax);
+#ifdef _DEVICEEMU
+  if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
 }
+
+// *** KERNELS ***
+
+// Start checking N's.
+__global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigned char *factor_found_arr) {
+  unsigned int n = d_nmin; // = nmin;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  uint64_t k0;
+  //unsigned char my_factor_found = 0;
+  uint64_t my_P, my_Ps;
+  my_P = P[i];
+  
+  // Better get this done before the first mulmod.
+  my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+  
+  // Calculate k0, in Montgomery form.
+  k0 = invpowmod_REDClr(my_P, my_Ps);
+
+  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, my_Ps);
+
+  if(d_search_proth) k0 = my_P-k0;
+
+  //my_factor_found = 0;
+  //d_check_some_ns(my_P, my_Ps, k0, n, my_factor_found, i);
+
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  factor_found_arr[i] = 0;
+  if(n < d_nmax) {
+    Ps[i] = my_Ps;
+	K[i] = k0;
+  }
+}
+
+// Continue checking N's.
+__global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr) {
+  unsigned int n = N;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  uint64_t k0 = K[i];
+  unsigned char my_factor_found = factor_found_arr[i];
+
+  d_check_some_ns(P[i], Ps[i], k0, n, my_factor_found, i);
+
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  factor_found_arr[i] = my_factor_found;
+  if(n < d_nmax) {
+	K[i] = k0;
+  }
+}
+
+// *** Host Kernel-calling functions ***
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
+  unsigned int n;
   // timing variables:
   cudaError_t res;
   // Pass P.
@@ -506,17 +577,19 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  // Don't Pass K; it's calculated internally!
-  d_check_ns<<<cthread_count/128,128>>>(d_P, d_factor_found);
+  d_start_ns<<<cthread_count/128,128>>>(d_P, d_Ps, d_K, d_factor_found);
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
 #endif
+  // Continue checking until nmax is reached.
+  for(n = nmin; n < nmax; n += ld_kernel_nstep) {
+    d_check_more_ns<<<cthread_count/128,128>>>(d_P, d_Ps, d_K, n, d_factor_found);
+  }
 }
 
-void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t) {
-  static __thread int check_ns_delay = 0;
+void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count) {
   // Get d_factor_found, into the thread'th factor_found array.
-  cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &check_ns_delay, check_ns_overlap, start_t);
+  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
 #endif
@@ -524,7 +597,9 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
 
 void cuda_finalize(void) {
   //cudaFree(d_bitsskip);
-  //cudaFree(d_K);
+//  cudaFree(d_N);
+  cudaFree(d_K);
+  cudaFree(d_Ps);
   cudaFree(d_P);
   cudaFree(d_factor_found);
 }

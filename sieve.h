@@ -15,10 +15,11 @@
 #define _SIEVE_H
 
 #include <limits.h>
-#include <stdint.h>
 #ifdef _WIN32
+#include "stdint.h"
 #include <windows.h>
 #else
+#include <stdint.h>
 #include <pthread.h>
 #endif
 

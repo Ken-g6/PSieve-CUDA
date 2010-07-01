@@ -10,16 +10,19 @@
    (at your option) any later version.
 */
 
-#include <assert.h>
+//#include <assert.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <string.h>
-#include <inttypes.h>
-#include <getopt.h>
 #include <ctype.h>
 #ifdef _WIN32
 #include <windows.h>
+#include "getopt.h"
+#include "stdint.h"
+#include "inttypes.h"
 #else
+#include <getopt.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include <pthread.h>
 #endif
 #ifdef __SSE2__
@@ -33,7 +36,11 @@
 #include "putil.h"
 #include "app.h"
 #include "appcu.h"
+#ifdef __GCC__
 #define INLINE static inline
+#else
+#define INLINE static __inline
+#endif
 
 #ifndef __x86_64__
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
@@ -78,7 +85,7 @@ static int print_factors = 1;
 int search_proth = 1; // Search for Proth or Riesel numbers?
 static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 //static unsigned int bitsmask, bpernstep;
-static uint64_t* gpu_start_times;
+static int* gpu_started;
 //static uint64_t** bitsskip;
 static unsigned char** factor_found;
 static int device_opt = -1;
@@ -116,7 +123,11 @@ static void report_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 //                             0  1  2  3  4  5  6  7  8  9 10 11 12 13 14
 static const int prime15[] = { 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1 };
 
+#ifdef _WIN32
+static void
+#else
 static void __attribute__((noinline))
+#endif
 test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
   uint64_t b = k/2;
@@ -622,9 +633,9 @@ void app_init(void)
   */
 
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
-  gpu_start_times = xmalloc(num_threads*sizeof(uint64_t));
+  gpu_started = xmalloc(num_threads*sizeof(int));
   for(i=0; i < num_threads; i++) {
-    gpu_start_times[i] = (uint64_t)0;
+    gpu_started[i] = 0;
   }
 
 #ifdef _WIN32
@@ -643,9 +654,7 @@ void app_init(void)
  */
 unsigned int app_thread_init(int th)
 {
-  unsigned int i;
-  uint16_t mode;
-  unsigned int cthread_count;
+  unsigned int i, cthread_count;
 
   if(device_opt >= 0) {
     cthread_count = cuda_app_init(device_opt);
@@ -661,13 +670,6 @@ unsigned int app_thread_init(int th)
     }
   } else factor_found[th] = NULL;
 
-  /* Set FPU to use extended precision and round to zero. This has to be
-     done here rather than in app_init() because _beginthreadex() doesn't
-     preserve the FPU mode. */
-
-  asm ("fnstcw %0" : "=m" (mode) );
-  mode |= 0x0F00;
-  asm volatile ("fldcw %0" : : "m" (mode) );
   return cthread_count;
 }
 
@@ -903,7 +905,7 @@ void test_one_p(const uint64_t my_P) {
   }
 }
 
-inline void check_factors_found(const int th, const uint64_t *__attribute__((aligned(16))) P, const unsigned int cthread_count) {
+INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned int cthread_count) {
   unsigned int i;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
@@ -919,32 +921,32 @@ inline void check_factors_found(const int th, const uint64_t *__attribute__((ali
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
    P is an array of APP_BUFLEN candidate primes.
 */
-void app_thread_fun(int th, const uint64_t *__attribute__((aligned(16))) P, uint64_t *__attribute__((aligned(16))) lastP, const unsigned int cthread_count)
+void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned int cthread_count)
 {
   unsigned int i;
-  uint64_t new_start_time;
+  //uint64_t new_start_time;
 
   // If there was a kernel running, get its results first.
-  if(gpu_start_times[th] != 0) {
-    //printf("Getting factors from iteration at %d\n", gpu_start_times[th]);
-    get_factors_found(factor_found[th], cthread_count, gpu_start_times[th]);
+  if(gpu_started[th] != 0) {
+    //printf("Getting factors from iteration at %d\n", gpu_started[th]);
+    get_factors_found(factor_found[th], cthread_count);
   }
 
   // Start the next kernel.
   check_ns(P, cthread_count);
-  new_start_time = elapsed_usec();
+  //new_start_time = elapsed_usec();
   //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
 
-  if(gpu_start_times[th] != 0) {
+  if(gpu_started[th] != 0) {
     check_factors_found(th, lastP, cthread_count);
-    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_start_times[th], lastP[0]);
+    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_started[th], lastP[0]);
   }
 
   // Copy the new P's over the old.
   for(i=0; i < cthread_count; i++) {
     lastP[i] = P[i];
   }
-  gpu_start_times[th] = new_start_time;
+  gpu_started[th] = 1;
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
@@ -970,12 +972,16 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int ct
     app_thread_fun(th,P,lastP, cthread_count);
   }
   // Finish the last kernel.
-  if(gpu_start_times[th] != 0) {
-    //printf("Getting factors from iteration at %d\n", gpu_start_times[th]);
-    get_factors_found(factor_found[th], cthread_count, gpu_start_times[th]);
-    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_start_times[th], lastP[0]);
+  if(gpu_started[th] != 0) {
+#ifdef TRACE
+    printf("Getting factors from iteration at %d\n", gpu_started[th]);
+#endif
+    get_factors_found(factor_found[th], cthread_count);
+#ifdef TRACE
+    printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_started[th], lastP[0]);
+#endif
     check_factors_found(th, lastP, cthread_count);
-    gpu_start_times[th] = (uint64_t)0;
+    gpu_started[th] = 0;
   }
 }
 

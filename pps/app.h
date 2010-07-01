@@ -13,7 +13,7 @@
 #define _APP_H 1
 
 #include <stdio.h>
-#include <stdint.h>
+#include "stdint.h"
 
 
 #define APP_VERSION "cuda-0.1.1"
@@ -52,9 +52,13 @@ void app_thread_fini(int th);
 int app_read_checkpoint(FILE *f);
 void app_write_checkpoint(FILE *f);
 void app_fini(void);
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 extern unsigned int nmin, nmax;
 extern int search_proth;
 extern uint64_t kmax, kmin;
-
+#ifdef __cplusplus
+}
+#endif
 #endif /* _APP_H */

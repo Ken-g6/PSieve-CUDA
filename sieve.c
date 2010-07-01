@@ -12,11 +12,11 @@
 */
 
 #include <assert.h>
-#include <stdint.h>
+#include "stdint.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
+#include "inttypes.h"
 #include <math.h>
 #include "putil.h"
 #include "sieve.h"
@@ -29,7 +29,11 @@ static unsigned int lim_sieve_primes = 0; /* List contains all primes <= lim */
 
 
 #if SMALL_PRIMES
+#ifdef _WIN32
+static void init_residues(sieve_data_t *sv)
+#else
 static void __attribute__((noinline)) init_residues(sieve_data_t *sv)
+#endif
 {
   uint64_t p0;
   unsigned int i, n, q, r;

@@ -15,7 +15,7 @@
 #ifndef _MAIN_H
 #define _MAIN_H 1
 
-#include <stdint.h>
+#include "stdint.h"
 
 
 #define MAX_THREADS 32  /* Excluding parent thread */
@@ -48,13 +48,12 @@ FILE* bfopen(const char *filename, const char *mode);
 void bmsg(const char *msg);
 char* bmprefix();
 void bexit(int status);
-#ifdef __cplusplus
-}
-#endif
 
 extern unsigned int num_threads; /* Excluding parent thread */
 extern uint64_t pmin, pmax;
 extern unsigned int quiet_opt;
-
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _MAIN_H */

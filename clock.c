@@ -9,10 +9,11 @@
    (at your option) any later version.
 */
 
-#include <stdint.h>
 #ifdef _WIN32
 # include <windows.h>
+#include "stdint.h"
 #else
+#include <stdint.h>
 # include <sys/resource.h>
 # include <sys/time.h>
 #endif

@@ -10,6 +10,11 @@
 #ifndef _APPCU_H
 #define _APPCU_H 1
 
+// BLOCKSIZE should be a power of two for greatest efficiency.
+#define BLOCKSIZE 128
+// Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
+#define ITERATIONS_PER_KERNEL 3000
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,14 +22,14 @@ extern "C" {
 unsigned int cuda_app_init(int gpuno);
 //void setup_ps(const uint64_t *P, unsigned int cthread_count);
 void check_ns(const uint64_t *P, const unsigned int cthread_count);
-void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, uint64_t start_t);
+void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count);
 void cuda_finalize(void);
-#ifdef __cplusplus
-}
-#endif
 
 extern unsigned int ld_nstep;
 extern int ld_bbits;
 extern uint64_t ld_r0;
+#ifdef __cplusplus
+}
+#endif
 
 #endif

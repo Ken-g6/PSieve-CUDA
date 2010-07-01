@@ -12,8 +12,7 @@
 #ifndef _CLOCK_H
 #define _CLOCK_H 1
 
-#include <stdint.h>
-
+#include "stdint.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
