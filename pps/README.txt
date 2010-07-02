@@ -52,6 +52,9 @@ the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version."
 
 Source code should be found at http://sites.google.com/site/kenscode/
+and/or http://github.com/Ken-g6/PSieve-CUDA
+
+As a CUDA application, this program links with nVIDIA's proprietary CUDA SDK (version 2.3, found at http://developer.nvidia.com/object/cuda_2_3_downloads.html.  The Linux versions also link to nVIDIA's proprietary drivers (version 256.25).  The driver dependency can be avoided by using the included cuda_sleep_memcpy.cu, though with some increase in CPU usage.  See older versions of PSieve-CUDA for examples.
 
 How it works (with apologies to John M. Pollard):
 Power N, mulmod from there,
