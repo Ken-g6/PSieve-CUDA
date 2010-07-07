@@ -126,17 +126,16 @@ static sem_t checkpoint_semaphoreA;
 static sem_t checkpoint_semaphoreB;
 #endif
 
+static int got_sigint = 0, got_sigterm=0, got_sighup=0;
 static void handle_signal(int signum)
 {
   switch (signum)
   {
-    case SIGINT:
-    case SIGTERM:
+    case SIGINT: got_sigint = 1; stopping = 1; break;
+    case SIGTERM: got_sigterm = 1; stopping = 1; break;
 #ifdef SIGHUP
-    case SIGHUP:
+    case SIGHUP: got_sighup = 1; stopping = 1; break;
 #endif
-      stopping = 1;
-      break;
   }
 }
 
@@ -363,7 +362,7 @@ static uint64_t read_checkpoint(void)
 }
 
 
-static const char *short_opts = "p:P:Q:B:C:c:r:t:z:d:qh" APP_SHORT_OPTS;
+static const char *short_opts = "p:P:Q:B:C:c:r:t:z:qh" APP_SHORT_OPTS;
 
 static const struct option long_opts[] = {
   {"pmin",        required_argument, 0, 'p'},
@@ -376,7 +375,7 @@ static const struct option long_opts[] = {
   {"report",      required_argument, 0, 'r'},
   {"nthreads",    required_argument, 0, 't'},
   {"priority",    required_argument, 0, 'z'},
-  {"device",      required_argument, 0, 'd'},
+  //{"device",      required_argument, 0, 'd'},
   {"help",        no_argument,       0, 'h'},
   {"quiet",       no_argument,       0, 'q'},
   APP_LONG_OPTS
@@ -394,8 +393,6 @@ static void help(void)
   printf("   --blocks=N      Sieve up to N blocks ahead (default N=%d)\n",
          BLOCKS_OPT_DEFAULT);
   printf("-c --checkpoint=N  Checkpoint every N seconds (default N=%d)\n",
-         CHECKPOINT_OPT_DEFAULT);
-  printf("-d --device=N      Use GPU N\n",
          CHECKPOINT_OPT_DEFAULT);
   printf("-q --quiet         Don't print factors to screen\n");
   printf("-r --report=N      Report status every N seconds (default N=%d)\n",
@@ -1176,6 +1173,12 @@ int main(int argc, char *argv[])
         (double)(stop_processor_time-sieve_start_processor_time)
         /(stop_time-sieve_start_time));
   }
+
+  if(got_sigint) raise(SIGINT);
+  if(got_sigterm) raise(SIGTERM);
+#ifdef SIGHUP
+  if(got_sighup) raise(SIGHUP);
+#endif
   boinc_finish(process_ret);
   return process_ret;
 }

@@ -484,7 +484,7 @@ int app_parse_option(int opt, char *arg, const char *source)
       break;
 
     case 'd':
-      status = parse_uint((unsigned int *)(&device_opt),arg,1,INT32_MAX);
+      status = parse_uint((unsigned int *)(&device_opt),arg,0,INT32_MAX);
       break;
 
     case 'R':

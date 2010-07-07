@@ -16,7 +16,7 @@
 #include "stdint.h"
 
 
-#define APP_VERSION "cuda-0.1.2"
+#define APP_VERSION "cuda-0.1.2a"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -29,7 +29,7 @@
 
 #define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:"
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
