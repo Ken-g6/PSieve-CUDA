@@ -54,11 +54,16 @@
 #endif
 
 /* BOINC API */
-
+#ifdef __APPLE__
+#include "boinc_api.h"
+#include "diagnostics.h"
+#include "filesys.h"
+#else
 #include "BOINC/boinc_api.h"
 #include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
 // Note: filesys.h has some improperly #ifdef-ed C++ #includes, when building on Win32 with MinGW/MSys.
 #include "BOINC/filesys.h"         // boinc_fopen(), etc...
+#endif
 #endif
 
 /* Global variables

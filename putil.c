@@ -19,7 +19,11 @@
 #include "putil.h"
 
 #ifdef USE_BOINC
+#ifdef __APPLE__
+#include "boinc_api.h"
+#else
 #include "BOINC/boinc_api.h"
+#endif
 #endif
 
 void *xmalloc(size_t size)
