@@ -13,7 +13,7 @@
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
-#define ITERATIONS_PER_KERNEL 3000
+#define ITERATIONS_PER_KERNEL 300
 
 #ifdef __cplusplus
 extern "C" {
