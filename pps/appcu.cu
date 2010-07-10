@@ -116,7 +116,11 @@ unsigned int cuda_app_init(int gpuno)
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
+#ifdef USE_BOINC
+    bexit(1);
+#else
     return 0;
+#endif
   }
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
@@ -135,9 +139,13 @@ unsigned int cuda_app_init(int gpuno)
   if(gpuprop.major == 2) cthread_count = 1024;
   cthread_count *= gpuprop.multiProcessorCount;
 
-  if(gpuprop.totalGlobalMem < cthread_count*5) {
+  if(gpuprop.totalGlobalMem < cthread_count*13) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
+#ifdef USE_BOINC
+    bexit(1);
+#else
     return 0;
+#endif
   }
   // Calculate ld_bitsatatime given memory constraints, and possibly nmin-nmax via nstep vs. 2^ld_bitsatatime
   // Things change if nmax-nmin < 1000000 or so, but for now let's go with a constant maximum of ld_bitsatatime<=13.
@@ -177,7 +185,11 @@ unsigned int cuda_app_init(int gpuno)
       //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
+#ifdef USE_BOINC
+    bexit(1);
+#else
     return 0;
+#endif
   }
 
   //ld_bitsmask--; // Finalize bitsmask
