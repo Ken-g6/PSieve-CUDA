@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include "main.h"
 #ifdef _WIN32
 #include <windows.h>
 #include "getopt.h"
@@ -23,7 +24,9 @@
 #include <getopt.h>
 #include <stdint.h>
 #include <inttypes.h>
+#ifndef SINGLE_THREAD
 #include <pthread.h>
+#endif
 #endif
 #ifdef __SSE2__
 #define EMM
@@ -32,7 +35,6 @@
 #include <time.h>
 #endif
 #endif
-#include "main.h"
 #include "putil.h"
 #include "app.h"
 #include "appcu.h"
@@ -90,19 +92,23 @@ static int* gpu_started;
 static unsigned char** factor_found;
 static int device_opt = -1;
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
 static CRITICAL_SECTION factors_mutex;
 #else
 static pthread_mutex_t factors_mutex;
 #endif
+#endif
 
 
 static void report_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   EnterCriticalSection(&factors_mutex);
 #else
   pthread_mutex_lock(&factors_mutex);
+#endif
 #endif
 
   if (factors_file != NULL && fprintf(factors_file,"%"PRIu64" | %"PRIu64"*2^%u%+d\n",p,k,n,c) > 0)
@@ -112,10 +118,12 @@ static void report_factor(uint64_t p, uint64_t k, unsigned int n, int c)
   else fprintf(stderr, "%sUNSAVED: %"PRIu64" | %"PRIu64"*2^%u%+d\n",bmprefix(),p,k,n,c);
   factor_count++;
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   LeaveCriticalSection(&factors_mutex);
 #else
   pthread_mutex_unlock(&factors_mutex);
+#endif
 #endif
 }
 
@@ -638,10 +646,12 @@ void app_init(void)
     gpu_started[i] = 0;
   }
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   InitializeCriticalSection(&factors_mutex);
 #else
   pthread_mutex_init(&factors_mutex,NULL);
+#endif
 #endif
 
   printf("ppsieve initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n <= %u\n",
@@ -1038,10 +1048,12 @@ void app_fini(void)
   fclose(factors_file);
   printf("Found %u factor%s\n",factor_count,(factor_count==1)? "":"s");
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   DeleteCriticalSection(&factors_mutex);
 #else
   pthread_mutex_destroy(&factors_mutex);
+#endif
 #endif
 
   if (bitmap != NULL)

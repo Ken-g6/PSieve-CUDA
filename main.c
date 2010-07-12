@@ -24,19 +24,21 @@
 #include <math.h>
 #include "getopt.h"
 #include <time.h>
+#include "main.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #include <process.h>
 #else
+#ifndef SINGLE_THREAD
 #include <pthread.h>
 #include <semaphore.h>
+#endif
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #endif
 
-#include "main.h"
 #include "clock.h"
 #include "sieve.h"
 #include "putil.h"
@@ -46,11 +48,6 @@
 #ifdef USE_BOINC
 #ifdef _WIN32                //  Stuff we only need on Windows: 
 #include "BOINC/boinc_win.h"
-#define getThreadPriority() GetThreadPriority(GetCurrentThread())
-#define setThreadPriority(num) SetThreadPriority(GetCurrentThread(), num)
-#else
-#define getThreadPriority() getpriority(PRIO_PROCESS, 0)
-#define setThreadPriority(num) nice(num)
 #endif
 
 /* BOINC API */
@@ -121,6 +118,7 @@ static thread_data_t thread_data[MAX_THREADS];
 
 /* Thread shared variables
  */
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
 static HANDLE checkpoint_semaphoreA;
 static HANDLE checkpoint_semaphoreB;
@@ -129,6 +127,7 @@ static pthread_mutex_t exiting_mutex;
 static pthread_cond_t exiting_cond;
 static sem_t checkpoint_semaphoreA;
 static sem_t checkpoint_semaphoreB;
+#endif
 #endif
 
 static int got_sigint = 0, got_sigterm=0, got_sighup=0;
@@ -367,8 +366,11 @@ static uint64_t read_checkpoint(void)
 }
 
 
+#ifdef SINGLE_THREAD
+static const char *short_opts = "p:P:Q:B:C:c:r:z:qh" APP_SHORT_OPTS;
+#else
 static const char *short_opts = "p:P:Q:B:C:c:r:t:z:qh" APP_SHORT_OPTS;
-
+#endif
 static const struct option long_opts[] = {
   {"pmin",        required_argument, 0, 'p'},
   {"pmax",        required_argument, 0, 'P'},
@@ -378,7 +380,9 @@ static const struct option long_opts[] = {
   {"blocks",      required_argument, 0, 256},
   {"checkpoint",  required_argument, 0, 'c'},
   {"report",      required_argument, 0, 'r'},
+#ifndef SINGLE_THREAD
   {"nthreads",    required_argument, 0, 't'},
+#endif
   {"priority",    required_argument, 0, 'z'},
   //{"device",      required_argument, 0, 'd'},
   {"help",        no_argument,       0, 'h'},
@@ -402,7 +406,9 @@ static void help(void)
   printf("-q --quiet         Don't print factors to screen\n");
   printf("-r --report=N      Report status every N seconds (default N=%d)\n",
          REPORT_OPT_DEFAULT);
+#ifndef SINGLE_THREAD
   printf("-t --nthreads=N    Start N threads on N GPUs (default N=1)\n");
+#endif
   printf("-z --priority=N    Set process priority to nice N or {idle,low,normal}\n");
   printf("-h --help          Print this help\n");
 }
@@ -448,9 +454,11 @@ static int parse_option(int opt, char *arg, const char *source)
       status = parse_uint(&report_opt,arg,0,UINT32_MAX);
       break;
 
+#ifndef SINGLE_THREAD
     case 't':
       status = parse_uint(&num_threads,arg,1,MAX_THREADS);
       break;
+#endif
 
     case 'z':
       if (strcmp(arg,"idle") == 0)
@@ -636,6 +644,7 @@ static int read_config_file(const char *fn)
 }
 
 
+#ifndef SINGLE_THREAD
 #ifndef _WIN32
 /* Child thread cleanup handler signals parent before child thread exits.
    This is needed because the pthreads API lacks the equivalent of a select
@@ -655,6 +664,7 @@ static void thread_cleanup(void *arg)
   pthread_mutex_unlock(&exiting_mutex);
 }
 #endif
+#endif
 
 static void *thread_fun(void *arg)
 {
@@ -665,10 +675,19 @@ static void *thread_fun(void *arg)
   unsigned int plen, len;
   unsigned long *buf;
   unsigned int cthread_count;
+#ifdef SINGLE_THREAD
+  uint64_t progress;
+  // 1 if a CUDA block just finished, making this a good point to report/save status.
+  int good_break_point = 0;
+#endif
 
   //fprintf(stderr,"Thread %d starting\n",th);
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
+#ifdef USE_BOINC
+      SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
+#else
   if (priority_opt)
   {
     if (priority_opt > 14)
@@ -679,9 +698,11 @@ static void *thread_fun(void *arg)
       SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
   }
 #endif
+#endif
 
 #ifndef _WIN32
   pthread_cleanup_push(thread_cleanup,arg);
+#endif
 #endif
 
   fprintf(stderr,"%sThread %d starting\n", bmprefix(),th);
@@ -716,6 +737,9 @@ static void *thread_fun(void *arg)
 #endif
           break;
 
+#ifdef SINGLE_THREAD
+      good_break_point = 0;
+#endif
       for (i = 0; i < len; i++)
       {
         unsigned int j;
@@ -738,6 +762,9 @@ static void *thread_fun(void *arg)
           if (plen == cthread_count) {
             app_thread_fun(th,P,K,cthread_count);
             plen = 0;
+#ifdef SINGLE_THREAD
+            good_break_point = 1;
+#endif
           }
         }
       }
@@ -748,7 +775,18 @@ static void *thread_fun(void *arg)
       free_chunk(sv,p0);
 #endif
 
+#ifdef SINGLE_THREAD
+      if(good_break_point) {
+        progress = next_chunk(sv);
+        report_status(0,0,0,progress);
+#ifdef USE_BOINC
+        if(boinc_time_to_checkpoint())
+#else
       if (checkpointing)
+#endif
+#else
+      if (checkpointing)
+#endif
       {
         app_thread_fun1(th,P,K,cthread_count,plen), plen = 0;
         thread_data[th].count = count;
@@ -756,12 +794,19 @@ static void *thread_fun(void *arg)
 #ifdef TRACE
         printf("Thread %d: Synchronising for checkpoint\n",th);
 #endif
+#ifdef USE_BOINC
+        /* Without threads, write a checkpoint whenever done with a chunk and BOINC is ready. */
+      write_checkpoint(progress);
+      last_checkpoint_progress = progress;
+      boinc_checkpoint_completed();
+#else
 #ifdef _WIN32
         ReleaseSemaphore(checkpoint_semaphoreA,1,NULL);
         WaitForSingleObject(checkpoint_semaphoreB,INFINITE);
 #else
         sem_post(&checkpoint_semaphoreA);
         sem_wait(&checkpoint_semaphoreB);
+#endif
 #endif
 #ifdef TRACE
         printf("Thread %d: Continuing after checkpoint\n",th);
@@ -771,6 +816,9 @@ static void *thread_fun(void *arg)
       else {
         printf("Thread %d: Not checkpointing.\n",th);
 	  }
+#endif
+#ifdef SINGLE_THREAD
+    }
 #endif
     }
 
@@ -787,6 +835,7 @@ static void *thread_fun(void *arg)
     /* Just in case a checkpoint is signalled before other threads exit */
     no_more_checkpoints = 1;
   }
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   ReleaseSemaphore(checkpoint_semaphoreA,1,NULL);
 #else
@@ -796,12 +845,14 @@ static void *thread_fun(void *arg)
 #ifndef _WIN32
   pthread_cleanup_pop(1);
 #endif
+#endif
 
   if(cthread_count > 0) free(P0);
   if(cthread_count > 0) free(K0);
   return 0;
 }
 
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
 static unsigned int __stdcall thread_fun_wrapper(void *arg)
 {
@@ -823,10 +874,12 @@ static unsigned int __stdcall thread_fun_wrapper(void *arg)
 #endif
 }
 #endif
+#endif
 
 
 int main(int argc, char *argv[])
 {
+#ifndef SINGLE_THREAD
 #ifdef _WIN32
   HANDLE tid[MAX_THREADS];
   DWORD thread_ret;
@@ -834,6 +887,7 @@ int main(int argc, char *argv[])
   pthread_t tid[MAX_THREADS];
   void *thread_ret;
   int joined;
+#endif
 #endif
   uint64_t pstop;
   int th, process_ret = EXIT_SUCCESS;
@@ -853,7 +907,7 @@ int main(int argc, char *argv[])
   process_args(argc,argv);
 #ifdef USE_BOINC
   // Get the priority.
-  priority_opt = getThreadPriority();
+  //priority_opt = getThreadPriority();
   //printf("Got priority %d.\n", priority_opt);
 #endif
 
@@ -890,6 +944,13 @@ int main(int argc, char *argv[])
     }
   }
 
+#ifdef USE_BOINC
+#ifdef _WIN32
+  SetPriorityClass(GetCurrentProcess(),NORMAL_PRIORITY_CLASS);
+#else
+  setpriority(PRIO_PROCESS,0,0);
+#endif
+#else
   if (priority_opt)
   {
 #ifdef _WIN32
@@ -903,6 +964,7 @@ int main(int argc, char *argv[])
     setpriority(PRIO_PROCESS,0,priority_opt-1);
 #endif
   }
+#endif
 
   if ((uint64_t)qmax*qmax > pmax)
     qmax = sqrt((double)pmax);
@@ -919,6 +981,16 @@ int main(int argc, char *argv[])
 
   init_signals();
 
+#ifdef SINGLE_THREAD
+  last_checkpoint_time = sieve_start_time;
+  last_checkpoint_progress = pstart;
+  last_report_time = sieve_start_time;
+  last_report_processor_time = sieve_start_processor_time;
+  last_report_processor_cycles = processor_cycles();
+  last_report_progress = pstart;
+  thread_fun((void *)0);
+  fini_signals();
+#else
 #ifdef _WIN32
   checkpoint_semaphoreA = CreateSemaphore(NULL,0,2147483647,NULL);
   checkpoint_semaphoreB = CreateSemaphore(NULL,0,2147483647,NULL);
@@ -1118,7 +1190,7 @@ int main(int argc, char *argv[])
   sem_destroy(&checkpoint_semaphoreA);
   sem_destroy(&checkpoint_semaphoreB);
 #endif
-
+#endif
   if (process_ret == EXIT_SUCCESS)
   {
     pstop = next_chunk(sv);

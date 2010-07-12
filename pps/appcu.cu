@@ -67,6 +67,7 @@ unsigned char *d_factor_found;
 //const int check_ns_overlap = 50000;
 
 static unsigned int ld_kernel_nstep;
+static bool blocking_sync_ok=true;
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -111,7 +112,8 @@ unsigned int cuda_app_init(int gpuno)
   unsigned int cthread_count;
 
 #ifndef _DEVICEEMU
-  SetCUDABlockingSync(gpuno);
+  blocking_sync_ok = SetCUDABlockingSync(gpuno);
+  if(blocking_sync_ok == false) bmsg("Blocking sync setup failed; try upgrading your drivers.\n");
 #endif
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {

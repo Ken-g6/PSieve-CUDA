@@ -17,8 +17,12 @@
 
 #include "stdint.h"
 
-
+#ifdef USE_BOINC
+#define SINGLE_THREAD
+#define MAX_THREADS 1  /* Excluding parent thread */
+#else
 #define MAX_THREADS 32  /* Excluding parent thread */
+#endif
 
 #define BLOCKSIZE_OPT_DEFAULT 524288  /* Bytes per sieve block */
 #define BLOCKSIZE_OPT_MIN 1024
