@@ -15,6 +15,7 @@
 #include <inttypes.h>
 #include <cuda.h>
 //#include <assert.h>
+#include "cuda_sleep_memcpy.h"
 #include "main.h"
 #include "putil.h"
 #include "app.h"
@@ -64,7 +65,7 @@ unsigned char *d_factor_found;
 
 // Timing variables:
 //const int setup_ps_overlap = 5000;
-//const int check_ns_overlap = 50000;
+const int check_ns_overlap = 50000;
 
 static unsigned int ld_kernel_nstep;
 static bool blocking_sync_ok=true;
@@ -591,19 +592,27 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  d_start_ns<<<cthread_count/128,128>>>(d_P, d_Ps, d_K, d_factor_found);
+  d_start_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_Ps, d_K, d_factor_found);
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
   for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-    d_check_more_ns<<<cthread_count/128,128>>>(d_P, d_Ps, d_K, n, d_factor_found);
+    d_check_more_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_Ps, d_K, n, d_factor_found);
   }
 }
 
-void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count) {
+void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
   // Get d_factor_found, into the thread'th factor_found array.
-  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+  if(blocking_sync_ok) {
+    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+  } else {
+    cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
+    if(*check_ns_delay > ((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
+      bmsg("Sleep-wait failed, switching to busy-wait.\nYou should *really* update your drivers!\n");
+      blocking_sync_ok = true;
+    }
+  }
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
 #endif

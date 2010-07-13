@@ -85,9 +85,10 @@ static unsigned int factor_count = 0;
 static int file_format = FORMAT_ABCD;
 static int print_factors = 1;
 int search_proth = 1; // Search for Proth or Riesel numbers?
+int *check_ns_delay;
 static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 //static unsigned int bitsmask, bpernstep;
-static int* gpu_started;
+static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
 static unsigned char** factor_found;
 static int device_opt = -1;
@@ -639,11 +640,14 @@ void app_init(void)
   }
   bitsmask--; // Finalize bitsmask.
   */
+  // Allocate check_ns_delay;
+  check_ns_delay = xmalloc(num_threads*sizeof(int));
+  for(i=0; i < num_threads; i++) check_ns_delay[i] = 0;
 
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
-  gpu_started = xmalloc(num_threads*sizeof(int));
+  gpu_started = xmalloc(num_threads*sizeof(uint64_t));
   for(i=0; i < num_threads; i++) {
-    gpu_started[i] = 0;
+    gpu_started[i] = (uint64_t)0;
   }
 
 #ifndef SINGLE_THREAD
@@ -934,20 +938,20 @@ INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned 
 void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned int cthread_count)
 {
   unsigned int i;
-  //uint64_t new_start_time;
+  uint64_t new_start_time;
 
   // If there was a kernel running, get its results first.
-  if(gpu_started[th] != 0) {
+  if(gpu_started[th] != (uint64_t)0) {
     //printf("Getting factors from iteration at %d\n", gpu_started[th]);
-    get_factors_found(factor_found[th], cthread_count);
+    get_factors_found(factor_found[th], cthread_count, gpu_started[th], &check_ns_delay[th]);
   }
 
   // Start the next kernel.
   check_ns(P, cthread_count);
-  //new_start_time = elapsed_usec();
+  new_start_time = elapsed_usec();
   //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
 
-  if(gpu_started[th] != 0) {
+  if(gpu_started[th] != (uint64_t)0) {
     check_factors_found(th, lastP, cthread_count);
     //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_started[th], lastP[0]);
   }
@@ -956,7 +960,7 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
   for(i=0; i < cthread_count; i++) {
     lastP[i] = P[i];
   }
-  gpu_started[th] = 1;
+  gpu_started[th] = new_start_time;
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
@@ -982,16 +986,16 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int ct
     app_thread_fun(th,P,lastP, cthread_count);
   }
   // Finish the last kernel.
-  if(gpu_started[th] != 0) {
+  if(gpu_started[th] != (uint64_t)0) {
 #ifdef TRACE
-    printf("Getting factors from iteration at %d\n", gpu_started[th]);
+    printf("Getting factors from iteration at %d\n", (unsigned int)gpu_started[th]);
 #endif
-    get_factors_found(factor_found[th], cthread_count);
+    get_factors_found(factor_found[th], cthread_count, gpu_started[th], &check_ns_delay[th]);
 #ifdef TRACE
-    printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_started[th], lastP[0]);
+    printf("Checking factors for iteration starting at %d with P=%lu\n", (unsigned int)gpu_started[th], lastP[0]);
 #endif
     check_factors_found(th, lastP, cthread_count);
-    gpu_started[th] = 0;
+    gpu_started[th] = (uint64_t)0;
   }
 }
 

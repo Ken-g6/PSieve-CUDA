@@ -15,6 +15,10 @@
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
 #define ITERATIONS_PER_KERNEL 300
 
+// Maximum time to sleep per K set, per N, in nanoseconds.
+// For PPSE sieve (7/2010), 3*2,000,000 N's = about 6 seconds.
+#define MAX_NS_DELAY_PER_N 3
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -22,7 +26,7 @@ extern "C" {
 unsigned int cuda_app_init(int gpuno);
 //void setup_ps(const uint64_t *P, unsigned int cthread_count);
 void check_ns(const uint64_t *P, const unsigned int cthread_count);
-void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count);
+void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay);
 void cuda_finalize(void);
 
 extern unsigned int ld_nstep;
