@@ -143,12 +143,22 @@ test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 
   if((k & 1) && n >= nmin && n < nmax) { // k is odd.
     if (bitmap == NULL) {
+      unsigned int khigh = (unsigned int)(k>>32);
+      uint64_t mod31 = (uint64_t)1;
       // Check that K*2^N+/-1 is not divisible by 3, 5, or 7, to minimize factors printed.
       // We do 3 and 5 at the same time (15 = 2^4-1), then 7 (=2^3-1).
+      // Then 17, 11 (and 31), 13, and maybe 19, if there's space. 23 can also go in there, if it's worth it.
       // (k*(1<<(n%2))+c)%3 == 0
       if(prime15[(unsigned int)(((k<<(n&3))+(uint64_t)c)%(uint64_t)15)] && 
-          (unsigned int)(((k<<(n%3))+(uint64_t)c)%(uint64_t)7) != 0)
-        report_factor(p,k,n,c);
+          (unsigned int)(((k<<(n%3))+(uint64_t)c)%(uint64_t)7) != 0 &&
+          (khigh >= (1<<(32-8)) || ((unsigned int)(((k<<(n&7))+(uint64_t)c)%(uint64_t)17) != 0 && 
+          (khigh >= (1<<(32-10)) || ((unsigned int)((mod31=(k<<(n%10))+(uint64_t)c)%(uint64_t)11) != 0 &&
+          (khigh >= (1<<(32-11)) || ((unsigned int)(((k<<(n%11))+(uint64_t)c)%(uint64_t)23) != 0 &&
+          (khigh >= (1<<(32-12)) || ((unsigned int)(((k<<(n%12))+(uint64_t)c)%(uint64_t)13) != 0 &&
+          (khigh >= (1<<(32-18)) || ((unsigned int)(((k<<(n%18))+(uint64_t)c)%(uint64_t)19) != 0
+          )))))))))))
+        if((unsigned int)(mod31%(uint64_t)31) != 0)
+          report_factor(p,k,n,c);
     } else {
       if (bitmap[n-nmin][(unsigned int)((b-b0)/8)] & (1<<(b-b0)%8))
         report_factor(p,k,n,c);
