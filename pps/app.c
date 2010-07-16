@@ -38,6 +38,7 @@
 #include "putil.h"
 #include "app.h"
 #include "appcu.h"
+#include "clock.h"
 #ifdef __GCC__
 #define INLINE static inline
 #else
@@ -652,11 +653,11 @@ void app_init(void)
   */
   // Allocate check_ns_delay;
   check_ns_delay = xmalloc(num_threads*sizeof(int));
-  for(i=0; i < num_threads; i++) check_ns_delay[i] = 0;
+  for(i=0; i < (unsigned int)num_threads; i++) check_ns_delay[i] = 0;
 
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
   gpu_started = xmalloc(num_threads*sizeof(uint64_t));
-  for(i=0; i < num_threads; i++) {
+  for(i=0; i < (unsigned int)num_threads; i++) {
     gpu_started[i] = (uint64_t)0;
   }
 
@@ -1081,7 +1082,7 @@ void app_fini(void)
     //free(bitsskip[i]);
   //}
   //free(bitsskip);
-  for(i=0; i < num_threads; i++) {
+  for(i=0; i < (unsigned int)num_threads; i++) {
     if(factor_found[i] != NULL) free(factor_found[i]);
   }
   free(factor_found);

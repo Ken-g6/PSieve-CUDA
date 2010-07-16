@@ -1,6 +1,6 @@
 /* ex: set softtabstop=2 shiftwidth=2 expandtab: */
 /* main.c -- (C) Geoffrey Reynolds, March 2009.
- * and some  (C) Ken Brazier, October 2009-June 2010.
+ * and some  (C) Ken Brazier, October 2009-July 2010.
 
    Multithreaded sieve application for algorithms of the form:
 
@@ -47,11 +47,11 @@
 #include "appcu.h"
 #ifdef USE_BOINC
 #ifdef _WIN32                //  Stuff we only need on Windows: 
-#include "BOINC/boinc_win.h"
+#include "boinc_win.h"
 #endif
 
 /* BOINC API */
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(_WIN32)
 #include "boinc_api.h"
 #include "diagnostics.h"
 #include "filesys.h"
@@ -65,7 +65,7 @@
 
 /* Global variables
  */
-unsigned int num_threads = 1;
+int num_threads = 1;
 uint64_t pmin = 0, pmax = 0;
 unsigned int quiet_opt = 0;
 
@@ -303,7 +303,7 @@ static void write_checkpoint(uint64_t p)
 
   if ((fout = fopen(checkpoint_filename,"w")) != NULL)
   {
-    for (i = 0, count = cand_count, sum = cand_sum; i < num_threads; i++)
+    for (i = 0, count = cand_count, sum = cand_sum; i < (unsigned int)num_threads; i++)
     {
       count += thread_data[i].count;
       sum += thread_data[i].sum;
@@ -934,7 +934,7 @@ int main(int argc, char *argv[])
   checkpoint_period = (uint64_t)checkpoint_opt * 1000000; /* usec */
   report_period = (uint64_t)report_opt * 1000000; /* usec */
 
-  if (blocksize_opt/chunksize_opt < num_threads)
+  if (blocksize_opt/chunksize_opt < (unsigned int)num_threads)
   {
     chunksize_opt = blocksize_opt/num_threads;
     if (chunksize_opt < CHUNKSIZE_OPT_MIN)
@@ -967,7 +967,7 @@ int main(int argc, char *argv[])
 #endif
 
   if ((uint64_t)qmax*qmax > pmax)
-    qmax = sqrt((double)pmax);
+    qmax = (unsigned int)sqrt((double)pmax);
   init_sieve_primes(qmax);
 
   app_init();

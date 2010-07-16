@@ -608,7 +608,7 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
     cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
   } else {
     cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
-    if(*check_ns_delay > ((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
+    if(*check_ns_delay > (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
       bmsg("Sleep-wait failed, switching to busy-wait.\nYou should *really* update your drivers!\n");
       blocking_sync_ok = true;
     }

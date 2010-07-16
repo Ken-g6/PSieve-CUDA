@@ -19,7 +19,7 @@
 #include "putil.h"
 
 #ifdef USE_BOINC
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(_WIN32)
 #include "boinc_api.h"
 #else
 #include "BOINC/boinc_api.h"
@@ -79,7 +79,7 @@ int parse_uint(unsigned int *result, const char *str,
   status = parse_uint64(&result64,str,lo,hi);
 
   if (status == 0)
-    *result = result64;
+    *result = (unsigned int)result64;
 
   return status;
 }

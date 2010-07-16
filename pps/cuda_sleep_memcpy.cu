@@ -96,7 +96,7 @@ cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, en
 	ret = cudaMemcpy(dst, src, count, kind);
 #ifndef BUSYWAIT
 	// Set that to the delay.
-	*delay = elapsed_usec()-start_t;
+	*delay = (int)(elapsed_usec()-start_t);
 
 	// Subtract the expected overlap.
 	*delay -= overlap;

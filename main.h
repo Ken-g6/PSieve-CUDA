@@ -53,7 +53,7 @@ void bmsg(const char *msg);
 char* bmprefix();
 void bexit(int status);
 
-extern unsigned int num_threads; /* Excluding parent thread */
+extern int num_threads; /* Excluding parent thread */
 extern uint64_t pmin, pmax;
 extern unsigned int quiet_opt;
 #ifdef __cplusplus

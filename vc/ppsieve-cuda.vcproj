@@ -15,7 +15,7 @@
 	</Platforms>
 	<ToolFiles>
 		<ToolFile
-			RelativePath="..\..\..\..\..\..\All Users\Application Data\NVIDIA Corporation\NVIDIA GPU Computing SDK\C\common\Cuda.Rules"
+			RelativePath="..\..\..\..\All Users\Application Data\NVIDIA Corporation\NVIDIA GPU Computing SDK\C\common\Cuda.Rules"
 		/>
 	</ToolFiles>
 	<Configurations>
@@ -354,7 +354,7 @@
 			/>
 			<Tool
 				Name="CUDA Build Rule"
-				Defines="NDEBUG"
+				Defines="NDEBUG;USE_BOINC"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -369,7 +369,8 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT"
+				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -387,9 +388,10 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib"
+				AdditionalDependencies="cudart.lib cuda.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
+				OutputFile="$(OutDir)\$(ProjectName)-boinc-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
+				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
@@ -440,6 +442,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\cuda_sleep_memcpy.cu"
+				>
+			</File>
+			<File
 				RelativePath=".\getopt.c"
 				>
 			</File>
@@ -471,6 +477,10 @@
 			</File>
 			<File
 				RelativePath=".\clock.h"
+				>
+			</File>
+			<File
+				RelativePath=".\cuda_sleep_memcpy.h"
 				>
 			</File>
 			<File
