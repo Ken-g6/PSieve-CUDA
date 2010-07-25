@@ -7,19 +7,21 @@
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2 of the License, or
    (at your option) any later version.
-*/
+ */
 
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
-#include <cuda.h>
+//#include <cuda.h>
 //#include <assert.h>
 #include "cuda_sleep_memcpy.h"
 #include "main.h"
 #include "putil.h"
 #include "app.h"
 #include "appcu.h"
+
+#include <unistd.h>
 
 #define INLINE static inline
 /*
@@ -29,13 +31,13 @@
 #define BITSMASK ((1<<BITSATATIME)-1)*/
 /*
 #if(BITSATATIME == 3)
-  #define SHIFT_CAST unsigned int
+#define SHIFT_CAST unsigned int
 #elif(BITSATATIME == 4)
-  #define SHIFT_CAST uint64_t
+#define SHIFT_CAST uint64_t
 #else
-  #error "Invalid BITSATATIME."
+#error "Invalid BITSATATIME."
 #endif
-*/
+ */
 // Extern vars in appcu.h:
 unsigned int ld_nstep;
 int ld_bbits;
@@ -70,34 +72,59 @@ const int check_ns_overlap = 50000;
 static unsigned int ld_kernel_nstep;
 static bool blocking_sync_ok=true;
 
+//globals for cuda
+cudaEvent_t stop;
+cudaStream_t stream;
+
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
-	int r = 0; // r will be lg(v)
+  int r = 0; // r will be lg(v)
 
-	while (v >>= 1) // unroll for more speed...
-	{
-		r++;
-	}
-	return r;
+  while (v >>= 1) // unroll for more speed...
+  {
+    r++;
+  }
+  return r;
 }
 #ifndef _DEVICEEMU
+void checkCUDAErr(const char* msg) {
+  cudaError_t err = cudaGetLastError();
+  if(cudaSuccess!=err) {
+    fprintf(stderr, "Cuda error: %s: %s\n", msg, cudaGetErrorString(err));
+    if(d_K){
+      cudaFree(d_K);
+    }
+    if(d_Ps){
+      cudaFree(d_Ps);
+    }
+    if(d_P){
+      cudaFree(d_P);
+    }
+    if(d_factor_found){
+      cudaFree(d_factor_found);
+    }
+    if(stop){
+      cudaEventDestroy(stop);
+    }
+    if(stream){
+      cudaStreamDestroy(stream);
+    }
+    exit(EXIT_FAILURE);
+  }
+}
+
 bool SetCUDABlockingSync(int device) {
-    CUdevice  hcuDevice;
-    CUcontext hcuContext;
+  cudaError_t status = cudaGetLastError();
 
-    CUresult status = cuInit(0);
-    if(status != CUDA_SUCCESS)
-       return false;
+  if(status != cudaSuccess) return false;
 
-    status = cuDeviceGet( &hcuDevice, device);
-    if(status != CUDA_SUCCESS)
-       return false;
+  status = cudaSetDevice(device);
+  if(status != cudaSuccess) return false;
 
-    status = cuCtxCreate( &hcuContext, 0x4, hcuDevice );
-    if(status != CUDA_SUCCESS)
-       return false;
+  status = cudaSetDeviceFlags(cudaDeviceBlockingSync);
+  if(status != cudaSuccess) return false;
 
-    return true;
+  return true;
 }
 #endif
 /* This function is called once before any threads are started.
@@ -130,7 +157,7 @@ unsigned int cuda_app_init(int gpuno)
     bmsg("Error: PMin is too small, <= 2^32!\n");
     bexit(1);
   }
-  cudaSetDevice(gpuno);
+  //  cudaSetDevice(gpuno);
   fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop.name);
   fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop.major, gpuprop.minor);
   fprintf(stderr, "%sDetected %d multiprocessors.\n", bmprefix(), gpuprop.multiProcessorCount);
@@ -161,31 +188,31 @@ unsigned int cuda_app_init(int gpuno)
   while(1) {
     // - d_bitsskip[] (Biggest array first.)
     //if(cudaMalloc((void**)&d_bitsskip, ld_bitsmask*cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-      // - P's
-      if(cudaMalloc((void**)&d_P, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-        // - Ps's
-        if(cudaMalloc((void**)&d_Ps, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-          // - K's
-          if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
-            // - N's
-            //if(cudaMalloc((void**)&d_N, cthread_count*sizeof(unsigned int)) == cudaSuccess) {
-              // - d_factor_found[]
-              if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
+    // - P's
+    if(cudaMalloc((void**)&d_P, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+      // - Ps's
+      if(cudaMalloc((void**)&d_Ps, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+        // - K's
+        if(cudaMalloc((void**)&d_K, cthread_count*sizeof(uint64_t)) == cudaSuccess) {
+          // - N's
+          //if(cudaMalloc((void**)&d_N, cthread_count*sizeof(unsigned int)) == cudaSuccess) {
+          // - d_factor_found[]
+          if(cudaMalloc((void**)&d_factor_found, cthread_count*sizeof(unsigned char)) == cudaSuccess) {
 #ifndef NDEBUG
-                fprintf(stderr, "Allocation successful!\n");
-                fprintf(stderr, "ld_bitsatatime = %u\n", ld_bitsatatime);
+            fprintf(stderr, "Allocation successful!\n");
+            fprintf(stderr, "ld_bitsatatime = %u\n", ld_bitsatatime);
 #endif
-                break;  // Allocation successful!
-              }
-			  //cudaFree(d_N);
-			//}
-            cudaFree(d_K);
+            break;  // Allocation successful!
           }
-          cudaFree(d_Ps);
+          //cudaFree(d_N);
+          //}
+          cudaFree(d_K);
         }
-        cudaFree(d_P);
+        cudaFree(d_Ps);
       }
-      //cudaFree(d_bitsskip);
+      cudaFree(d_P);
+    }
+    //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
@@ -253,18 +280,18 @@ unsigned int cuda_app_init(int gpuno)
 #ifdef __x86_64__
 #define DEBUG64
 /* Reduce a*2^64+b modulo m. Requires a < m, or the quotient (which we don't care about but the chip does) will overflow. */ 
-__device__ uint64_t
+  __device__ uint64_t
 longmod (uint64_t a, uint64_t b, const uint64_t m)
 {
   //ASSERT (a < m);
   __asm__
-  ( "divq %2"
-    : "+d" (a), /* Put "a" in %rdx, will also get result of mod */
+    ( "divq %2"
+      : "+d" (a), /* Put "a" in %rdx, will also get result of mod */
       "+a" (b)  /* Put "b" in %rax, will also be written to 
                    (quotient, which we don't need) */
-    : "rm" (m)  /* Modulus can be in a register or memory location */
-    : "cc"      /* Flags are clobbered */
-  );
+      : "rm" (m)  /* Modulus can be in a register or memory location */
+      : "cc"      /* Flags are clobbered */
+    );
   return a;
 }
 
@@ -278,57 +305,57 @@ __device__ uint64_t mulmod (uint64_t a, const uint64_t b, const uint64_t m)
 {
   uint64_t q, r, t1, t2;
   __asm__
-  ( "mulq %3\n\t"
-    : "=a" (t1), "=d" (t2)
-    : "0" (a), "rm" (b)
-    : "cc");
+    ( "mulq %3\n\t"
+      : "=a" (t1), "=d" (t2)
+      : "0" (a), "rm" (b)
+      : "cc");
   __asm__
-  ( "divq %4"
-    : "=a" (q), "=d" (r)
-    : "0" (t1), "1" (t2), "rm" (m)
-    : "cc"
-  );
+    ( "divq %4"
+      : "=a" (q), "=d" (r)
+      : "0" (t1), "1" (t2), "rm" (m)
+      : "cc"
+    );
   return r;
 } 
 
 
 /* Compute REDC(a*b) for modulus N. We need N*Ns == -1 (mod 2^64) */
-__device__ uint64_t
+  __device__ uint64_t
 asm_mulmod_REDC (const uint64_t a, const uint64_t b, 
-             const uint64_t N, const uint64_t Ns)
+    const uint64_t N, const uint64_t Ns)
 {
-	uint64_t r;
+  uint64_t r;
 
-	// Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
-	__asm__
-		( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-		  "movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
-		  "imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
-		  "cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
-		  "sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-		  "mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-		  "lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
-		  "subq %[N], %%rcx\n\t"	//				Cycle 20/19?
-		  "addq %%rdx, %%rcx\n\t"	//				Cycle 21/20?
-		  "cmovcq %%rcx, %[r]\n\t"	//				Cycle 22/21?
-		  : [r] "=r" (r)
-		  : "%a" (a), [b] "rm" (b), [N] "rm" (N), [Ns] "rm" (Ns)
-		  : "cc", "%rcx", "%rdx"
-		);
+  // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+  __asm__
+    ( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
+      "movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
+      "imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
+      "cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
+      "sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
+      "mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
+      "lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
+      "subq %[N], %%rcx\n\t"	//				Cycle 20/19?
+      "addq %%rdx, %%rcx\n\t"	//				Cycle 21/20?
+      "cmovcq %%rcx, %[r]\n\t"	//				Cycle 22/21?
+      : [r] "=r" (r)
+      : "%a" (a), [b] "rm" (b), [N] "rm" (N), [Ns] "rm" (Ns)
+      : "cc", "%rcx", "%rdx"
+    );
 
 #ifdef DEBUG64
-	if (longmod (r, 0, N) != mulmod(a, b, N))
-	{
-		fprintf (stderr, "%sError, asm mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, r);
-		abort();
-	}
+  if (longmod (r, 0, N) != mulmod(a, b, N))
+  {
+    fprintf (stderr, "%sError, asm mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, r);
+    abort();
+  }
 #endif
 
-   return r;
+  return r;
 }
 #endif
 #endif
-__device__ uint64_t
+  __device__ uint64_t
 invmod2pow_ul (const uint64_t n)
 {
   uint64_t r;
@@ -336,7 +363,7 @@ invmod2pow_ul (const uint64_t n)
   const unsigned int in = (unsigned int)n;
 
   //ASSERT (n % 2UL != 0UL);
-  
+
   // Suggestion from PLM: initing the inverse to (3*n) XOR 2 gives the
   // correct inverse modulo 32, then 3 (for 32 bit) or 4 (for 64 bit) 
   // Newton iterations are enough.
@@ -351,7 +378,7 @@ invmod2pow_ul (const uint64_t n)
 }
 
 __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b, 
-             const uint64_t N, const uint64_t Ns)
+    const uint64_t N, const uint64_t Ns)
 {
   uint64_t rax, rcx;
 
@@ -423,7 +450,7 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
 // rax is passed in as a * Ns.
 // rax's original value is destroyed, just to keep the register count down.
 __device__ uint64_t shiftmod_REDC (const uint64_t a, 
-             const uint64_t N, uint64_t &rax)
+    const uint64_t N, uint64_t &rax)
 {
   uint64_t rcx;
 
@@ -485,7 +512,7 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 // Device-local function to iterate over some N's.
 // To avoid register pressure, clobbers i, and changes all non-const arguments.
 __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
-								unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
   uint64_t kpos, kPs;
   unsigned int l_nmax = n + d_kernel_nstep;
   if(l_nmax > d_nmax) l_nmax = d_nmax;
@@ -510,7 +537,7 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
     kpos >>= i;
     if (kpos <= d_kmax) {
 #ifdef _DEVICEEMU
-    //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
       if(kpos >= d_kmin) my_factor_found = 1;
@@ -536,10 +563,10 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
   //unsigned char my_factor_found = 0;
   uint64_t my_P, my_Ps;
   my_P = P[i];
-  
+
   // Better get this done before the first mulmod.
   my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
-  
+
   // Calculate k0, in Montgomery form.
   k0 = invpowmod_REDClr(my_P, my_Ps);
 
@@ -554,7 +581,7 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
   factor_found_arr[i] = 0;
   if(n < d_nmax) {
     Ps[i] = my_Ps;
-	K[i] = k0;
+    K[i] = k0;
   }
 }
 
@@ -570,7 +597,7 @@ __global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t 
   i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   factor_found_arr[i] = my_factor_found;
   if(n < d_nmax) {
-	K[i] = k0;
+    K[i] = k0;
   }
 }
 
@@ -580,25 +607,28 @@ __global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t 
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   unsigned int n;
   // timing variables:
-  cudaError_t res;
+
   // Pass P.
-  res = cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
-  if(res != cudaSuccess) {
-    if(res == cudaErrorInvalidValue) bmsg("Memcpy error: Invalid value!\n");
-    if(res == cudaErrorInvalidDevicePointer) bmsg("Memcpy error: Invalid device pointer!\n");
-    if(res == cudaErrorInvalidMemcpyDirection) bmsg("Memcpy error: Invalid memcpy direction!\n");
-    bexit(1);
-  }
+  cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
+  checkCUDAErr("cudaMemcpy");
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  d_start_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_Ps, d_K, d_factor_found);
+  cudaStreamCreate(&stream);
+  checkCUDAErr("cudaStreamCreate");
+
+  cudaEventCreate(&stop);
+  checkCUDAErr("cudaEventCreate");
+
+  d_start_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, d_factor_found);
+  checkCUDAErr("kernel invocation");
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
   for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-    d_check_more_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE>>>(d_P, d_Ps, d_K, n, d_factor_found);
+    d_check_more_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+    checkCUDAErr("kernel invocation");
   }
 }
 
@@ -606,12 +636,19 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
   // Get d_factor_found, into the thread'th factor_found array.
   if(blocking_sync_ok) {
     cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    checkCUDAErr("kernel invocation");
   } else {
     cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
     if(*check_ns_delay > (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
       bmsg("Sleep-wait failed, switching to busy-wait.\nYou should *really* update your drivers!\n");
       blocking_sync_ok = true;
     }
+  }
+  cudaEventRecord(stop, stream);
+  checkCUDAErr("cudaEventRecord");
+
+  while(cudaEventQuery(stop) == cudaErrorNotReady){
+    usleep(1000);
   }
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
@@ -620,9 +657,11 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
 
 void cuda_finalize(void) {
   //cudaFree(d_bitsskip);
-//  cudaFree(d_N);
+  //cudaFree(d_N);
   cudaFree(d_K);
   cudaFree(d_Ps);
   cudaFree(d_P);
   cudaFree(d_factor_found);
+  cudaEventDestroy(stop);
+  cudaStreamDestroy(stream);
 }

@@ -10,7 +10,7 @@ BOINC_API_DIR=$BOINC_DIR/api
 BOINC_LIB_DIR=$BOINC_DIR/lib
 arch=`uname -m`
 link='-lm -lpthread' # -lcuda'
-if [ "$DOEMU" == "" ] ; then link="$link -lcuda" ; fi
+#if [ "$DOEMU" == "" ] ; then link="$link -lcuda" ; fi
 
 if [ "$BOINC_DIR" != "" ] ; then
 	BOINC_LOAD_LIBS="-I$BOINC_DIR -I$BOINC_LIB_DIR -I$BOINC_API_DIR -L$BOINC_DIR -L$BOINC_LIB_DIR -L$BOINC_API_DIR"
