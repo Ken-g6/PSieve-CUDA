@@ -388,7 +388,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib cuda.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
+				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
 				OutputFile="$(OutDir)\$(ProjectName)-boinc-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
