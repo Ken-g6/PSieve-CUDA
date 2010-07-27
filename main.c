@@ -686,7 +686,8 @@ static void *thread_fun(void *arg)
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
 #ifdef USE_BOINC
-      SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
+  SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+  SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
 #else
   if (priority_opt)
   {
@@ -988,6 +989,9 @@ int main(int argc, char *argv[])
   last_report_processor_time = sieve_start_processor_time;
   last_report_processor_cycles = processor_cycles();
   last_report_progress = pstart;
+  sieve_start_date = time(NULL);
+  sieve_start_time = elapsed_usec();
+  sieve_start_processor_time = processor_usec();
   thread_fun((void *)0);
   fini_signals();
 #else
