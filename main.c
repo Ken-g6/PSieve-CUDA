@@ -53,14 +53,15 @@
 /* BOINC API */
 #if defined(__APPLE__) || defined(_WIN32)
 #include "boinc_api.h"
-#include "diagnostics.h"
+//#include "diagnostics.h"
 #include "filesys.h"
 #else
 #include "BOINC/boinc_api.h"
-#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
+//#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
 // Note: filesys.h has some improperly #ifdef-ed C++ #includes, when building on Win32 with MinGW/MSys.
 #include "BOINC/filesys.h"         // boinc_fopen(), etc...
 #endif
+#include "do_boinc_init.h"
 #endif
 
 /* Global variables
@@ -894,12 +895,7 @@ int main(int argc, char *argv[])
   int th, process_ret = EXIT_SUCCESS;
 
 #ifdef USE_BOINC
-  boinc_init_diagnostics(BOINC_DIAG_REDIRECTSTDERR|
-      BOINC_DIAG_MEMORYLEAKCHECKENABLED|
-      BOINC_DIAG_DUMPCALLSTACKENABLED| 
-      BOINC_DIAG_TRACETOSTDERR);
-
-  boincordie(boinc_init(), "BOINC initialization failed!\n");
+  boincordie(do_boinc_init(), "BOINC initialization failed!\n");
 #endif
   program_start_time = elapsed_usec();
   app_banner();

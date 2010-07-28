@@ -446,6 +446,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\do_boinc_init.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\getopt.c"
 				>
 			</File>
@@ -481,6 +485,10 @@
 			</File>
 			<File
 				RelativePath=".\cuda_sleep_memcpy.h"
+				>
+			</File>
+			<File
+				RelativePath=".\do_boinc_init.h"
 				>
 			</File>
 			<File

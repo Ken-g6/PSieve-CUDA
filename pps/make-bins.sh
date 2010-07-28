@@ -30,7 +30,7 @@ if [ "$1" != "boinc" ] ; then
 else
 	if [ "$arch" == "i686" ] ; then
 		echo Making i686 BOINC version.
-		nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c cuda_sleep_memcpy.cu appcu.cu app.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+		nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 	fi
 fi
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
@@ -48,7 +48,7 @@ nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DNDEBUG -D_REENTRANT -m64 -I. -I.
 else
 	if [ "$arch" == "x86_64" ] ; then
 		echo Making x86_64 BOINC version.
-		nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-boinc-x86_64-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c cuda_sleep_memcpy.cu appcu.cu app.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+		nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m64 -I. -I.. -o $appname-boinc-x86_64-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 	fi
 fi
 if [ "$kernel" != "" ] ; then unset LD_ASSUME_KERNEL ; fi
