@@ -393,9 +393,9 @@ void check_ns(const uint64_t *P, uint64_t *K, unsigned char *factor_found, unsig
   fprintf(stderr, "Memcpy2 successful...\n");
 #endif
   if(pmax < (((uint64_t)1)<<(48+BITSATATIME))) {
-    d_check_ns<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
-  } else {
     d_check_ns_small<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
+  } else {
+    d_check_ns<<<cthread_count/128,128>>>(d_P, d_K, d_factor_found, d_bitsskip);
   }
 #ifndef NDEBUG
   fprintf(stderr, "Main kernel successful...\n");
