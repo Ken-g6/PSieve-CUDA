@@ -166,7 +166,7 @@ unsigned int cuda_app_init(int gpuno)
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
   cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
-  if(gpuprop.major == 2) cthread_count = 1024;
+  if(gpuprop.major >= 2) cthread_count = 1536;
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*13) {
@@ -605,6 +605,7 @@ __global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t 
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
+  const unsigned int cblockcount = cthread_count/BLOCKSIZE;
   unsigned int n;
   // timing variables:
 
@@ -620,14 +621,14 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   cudaEventCreate(&stop);
   checkCUDAErr("cudaEventCreate");
 
-  d_start_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, d_factor_found);
+  d_start_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, d_factor_found);
   checkCUDAErr("kernel invocation");
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
   for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-    d_check_more_ns<<<cthread_count/BLOCKSIZE,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+    d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
     checkCUDAErr("kernel invocation");
   }
 }
