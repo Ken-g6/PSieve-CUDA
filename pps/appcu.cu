@@ -86,7 +86,6 @@ int lg2(uint64_t v) {
   }
   return r;
 }
-#ifndef _DEVICEEMU
 void checkCUDAErr(const char* msg) {
   cudaError_t err = cudaGetLastError();
   if(cudaSuccess!=err) {
@@ -113,6 +112,7 @@ void checkCUDAErr(const char* msg) {
   }
 }
 
+#ifndef _DEVICEEMU
 bool SetCUDABlockingSync(int device) {
   cudaError_t status = cudaGetLastError();
 
@@ -169,7 +169,7 @@ unsigned int cuda_app_init(int gpuno)
   if(gpuprop.major >= 2) cthread_count = 1536;
   cthread_count *= gpuprop.multiProcessorCount;
 
-  if(gpuprop.totalGlobalMem < cthread_count*13) {
+  if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
 #ifdef USE_BOINC
     bexit(1);
