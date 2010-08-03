@@ -253,10 +253,13 @@ unsigned int cuda_app_init(int gpuno)
   cudaMemcpyToSymbol(d_mont_nstep, &i, sizeof(i));
   cudaMemcpyToSymbol(d_r0, &ld_r0, sizeof(ld_r0));
   // N's to search each time a kernel is run:
-  ld_kernel_nstep = ITERATIONS_PER_KERNEL * ld_nstep;
+  ld_kernel_nstep = ITERATIONS_PER_KERNEL;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
+  // Finally, make sure it's a multiple of ld_nstep!!!
+  ld_kernel_nstep *= ld_nstep;
+
   cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
   cudaMemcpyToSymbol(d_kmin, &kmin, sizeof(kmin));
@@ -265,7 +268,6 @@ unsigned int cuda_app_init(int gpuno)
   cudaMemcpyToSymbol(d_nstep, &ld_nstep, sizeof(ld_nstep));
   i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
   cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
-
 
   return cthread_count;
 }
@@ -610,7 +612,7 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   // timing variables:
 
   // Pass P.
-  cudaMemcpyAsync(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice, stream);
+  cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
   checkCUDAErr("cudaMemcpy");
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
@@ -636,10 +638,8 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
   // Get d_factor_found, into the thread'th factor_found array.
   if(blocking_sync_ok) {
-    cudaMemcpyAsync(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
     checkCUDAErr("getting factors found");
-    cudaThreadSynchronize();
-    checkCUDAErr("synching");
   } else {
     cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
     if(*check_ns_delay > (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
