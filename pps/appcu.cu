@@ -609,7 +609,7 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   // timing variables:
 
   // Pass P.
-  cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
+  cudaMemcpyAsync(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice, stream);
   checkCUDAErr("cudaMemcpy");
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
@@ -635,8 +635,10 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
   // Get d_factor_found, into the thread'th factor_found array.
   if(blocking_sync_ok) {
-    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
-    checkCUDAErr("kernel invocation");
+    cudaMemcpyAsync(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, stream);
+    checkCUDAErr("getting factors found");
+    cudaThreadSynchronize();
+    checkCUDAErr("synching");
   } else {
     cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
     if(*check_ns_delay > (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
