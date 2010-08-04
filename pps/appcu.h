@@ -11,8 +11,7 @@
 #define _APPCU_H 1
 
 // BLOCKSIZE should be a power of two for greatest efficiency.
-// But 192 might work.
-#define BLOCKSIZE 192
+#define BLOCKSIZE 128
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
 #define ITERATIONS_PER_KERNEL 300
 

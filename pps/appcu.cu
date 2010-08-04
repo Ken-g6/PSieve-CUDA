@@ -166,7 +166,7 @@ unsigned int cuda_app_init(int gpuno)
   // Use them to set cthread_count.
   // First, threads per multiprocessor, based on compute capability.
   cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
-  if(gpuprop.major >= 2) cthread_count = 1536;
+  if(gpuprop.major >= 2) cthread_count = 1024;
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
@@ -252,6 +252,7 @@ unsigned int cuda_app_init(int gpuno)
   i = 64-ld_nstep;
   cudaMemcpyToSymbol(d_mont_nstep, &i, sizeof(i));
   cudaMemcpyToSymbol(d_r0, &ld_r0, sizeof(ld_r0));
+
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
   // Adjust for differing block sizes.
