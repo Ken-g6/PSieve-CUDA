@@ -93,6 +93,7 @@ static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
 static unsigned char** factor_found;
 static int device_opt = -1;
+static unsigned int user_cthread_count = 0;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -487,6 +488,10 @@ int app_parse_option(int opt, char *arg, const char *source)
       status = parse_uint64(&kmax,arg,1,(UINT64_C(1)<<62)-1);
       break;
 
+    case 'm':
+      status = parse_uint(&user_cthread_count,arg,1,(1U<<14));
+      break;
+      
     case 'n':
       status = parse_uint(&nmin,arg,1,(1U<<31)-1);
       break;
@@ -526,6 +531,7 @@ void app_help(void)
   printf("-i --input=FILE    Read initial sieve from FILE\n");
   printf("-k --kmin=K0\n");
   printf("-K --kmax=K1       Sieve for primes k*2^n+/-1 with K0 <= k <= K1\n");
+  printf("-m --mthreads=M    Force M threads or blocks/multiprocessor.\n");
   printf("-n --nmin=N0\n");
   printf("-N --nmax=N1       Sieve for primes k*2^n+/-1 with N0 <= n <= N1\n");
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
@@ -682,9 +688,9 @@ unsigned int app_thread_init(int th)
   unsigned int i, cthread_count;
 
   if(device_opt >= 0) {
-    cthread_count = cuda_app_init(device_opt);
+    cthread_count = cuda_app_init(device_opt, user_cthread_count);
   } else {
-    cthread_count = cuda_app_init(th);
+    cthread_count = cuda_app_init(th, user_cthread_count);
   }
 
   // Allocate the factor_found arrays.

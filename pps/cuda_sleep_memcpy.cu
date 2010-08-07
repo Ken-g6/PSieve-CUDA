@@ -1,4 +1,4 @@
-/* cuda_sleep_memcpy.cu -- (C) Ken Brazier February 2010.
+/* cuda_sleep_memcpy.cu -- (C) Ken Brazier February-August 2010.
 
    Helps a consistent CUDA kernel not busy-wait so long.
 
@@ -12,6 +12,10 @@
 #endif
 #include <unistd.h>
 #include "clock.h"
+// Win32 has timing problems; better to just wait it out. :(
+#ifdef _WIN32
+#define BUSYWAIT
+#endif
 
 // Allows one to perform a CUDA memcpy without (as much) busy-wait.
 // For best performance, both the CUDA kernel and any CPU code after its launch
@@ -111,3 +115,50 @@ cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, en
 	return ret;
 }
 
+// Non-memcpy sleep-wait, for drivers that don't understand waiting for a signal.
+cudaError_t cudaSleepWait(cudaEvent_t &stop, int *delay, const int overlap, const uint64_t start_t) {
+	cudaError_t ret;
+#ifndef BUSYWAIT
+	// Timer variables.
+	int busy_wait_t;
+#endif
+	ret = cudaEventQuery(stop);
+	// If ready now, forget this foolishness.
+	if(ret != cudaErrorNotReady) {
+		*delay = 0;
+		return ret;
+	}
+#ifndef BUSYWAIT
+	// First, sleep as long as seemed a good idea last time.
+#ifdef TRACE
+	fprintf(stderr, "Sleeping %d usec.\n", *delay);
+#endif
+	// Figure out how much time is left before a result is expected.
+	if(*delay > 0) {
+		busy_wait_t = *delay - (int)(elapsed_usec()-start_t);
+		// Sleep that long.
+		if(busy_wait_t > 0) usleep(busy_wait_t);
+	}
+
+	// Now, time the busy-wait.
+#endif
+	// This near-busy-wait loop is from Gerrit Slomma (roadrunner_gs)
+	while((ret=cudaEventQuery(stop)) == cudaErrorNotReady){
+		usleep(1000);
+	}
+#ifndef BUSYWAIT
+	// Set that to the delay.
+	*delay = (int)(elapsed_usec()-start_t);
+
+	// Subtract the expected overlap.
+	*delay -= overlap;
+
+	// Can't sleep less than 0 seconds.
+	if(*delay < 0) *delay = 0;
+
+#ifdef TRACE
+	fprintf(stderr, "Will sleep %d usec next time.\n", *delay);
+#endif
+#endif
+	return ret;
+}

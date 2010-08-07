@@ -70,7 +70,7 @@ unsigned char *d_factor_found;
 const int check_ns_overlap = 50000;
 
 static unsigned int ld_kernel_nstep;
-static bool blocking_sync_ok=true;
+static int max_ns_delay = 0;
 
 //globals for cuda
 cudaEvent_t stop;
@@ -86,33 +86,40 @@ int lg2(uint64_t v) {
   }
   return r;
 }
+
+// Clean up and terminate, whether there was an error or no.
+void cuda_finalize(void) {
+  //cudaFree(d_bitsskip);
+  //cudaFree(d_N);
+  if(d_K){
+    cudaFree(d_K);
+  }
+  if(d_Ps){
+    cudaFree(d_Ps);
+  }
+  if(d_P){
+    cudaFree(d_P);
+  }
+  if(d_factor_found){
+    cudaFree(d_factor_found);
+  }
+  if(stop){
+    cudaEventDestroy(stop);
+  }
+  if(stream){
+    cudaStreamDestroy(stream);
+  }
+}
+
 void checkCUDAErr(const char* msg) {
   cudaError_t err = cudaGetLastError();
   if(cudaSuccess!=err) {
     fprintf(stderr, "Cuda error: %s: %s\n", msg, cudaGetErrorString(err));
-    if(d_K){
-      cudaFree(d_K);
-    }
-    if(d_Ps){
-      cudaFree(d_Ps);
-    }
-    if(d_P){
-      cudaFree(d_P);
-    }
-    if(d_factor_found){
-      cudaFree(d_factor_found);
-    }
-    if(stop){
-      cudaEventDestroy(stop);
-    }
-    if(stream){
-      cudaStreamDestroy(stream);
-    }
-    exit(EXIT_FAILURE);
+    cuda_finalize();
+    bexit(EXIT_FAILURE);
   }
 }
 
-#ifndef _DEVICEEMU
 bool SetCUDABlockingSync(int device) {
   cudaError_t status = cudaGetLastError();
 
@@ -126,10 +133,10 @@ bool SetCUDABlockingSync(int device) {
 
   return true;
 }
-#endif
+
 /* This function is called once before any threads are started.
  */
-unsigned int cuda_app_init(int gpuno)
+unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 {
   unsigned int i;
   struct cudaDeviceProp gpuprop;
@@ -137,16 +144,14 @@ unsigned int cuda_app_init(int gpuno)
   //unsigned int ld_halflen=(1<<bitsatatime)/2; 
   //unsigned int ld_bitsmask;
   //unsigned int ld_bpernstep;
-  unsigned int cthread_count;
+  //unsigned int cthread_count;
+  bool blocking_sync_ok=true;
 
-#ifndef _DEVICEEMU
-  blocking_sync_ok = SetCUDABlockingSync(gpuno);
-  if(blocking_sync_ok == false) bmsg("Blocking sync setup failed; try upgrading your drivers.\n");
-#endif
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
+    checkCUDAErr("getting device properties");
     bexit(1);
 #else
     return 0;
@@ -157,6 +162,8 @@ unsigned int cuda_app_init(int gpuno)
     bmsg("Error: PMin is too small, <= 2^32!\n");
     bexit(1);
   }
+  blocking_sync_ok = SetCUDABlockingSync(gpuno);
+  if(blocking_sync_ok == false) bmsg("Blocking sync setup failed; try upgrading your drivers.\n");
   //  cudaSetDevice(gpuno);
   fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop.name);
   fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop.major, gpuprop.minor);
@@ -164,9 +171,15 @@ unsigned int cuda_app_init(int gpuno)
   //fprintf(stderr, "%sDetected %lu bytes of device memory.\n", bmprefix(), gpuprop.totalGlobalMem);
 
   // Use them to set cthread_count.
-  // First, threads per multiprocessor, based on compute capability.
-  cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
-  if(gpuprop.major >= 2) cthread_count = 1024;
+  // If cthread_count was already set, make sure it's 0 mod BLOCKSIZE.
+  if(cthread_count == 0) {
+    // Threads per multiprocessor, based on compute capability, if not manually set.
+    cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
+    if(gpuprop.major >= 2) cthread_count = 1024;
+  } else {
+    if(cthread_count < BLOCKSIZE) cthread_count *= BLOCKSIZE;
+    else cthread_count -= cthread_count % BLOCKSIZE;
+  }
   cthread_count *= gpuprop.multiProcessorCount;
 
   if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
@@ -234,6 +247,7 @@ unsigned int cuda_app_init(int gpuno)
   }
   // Set the constants.
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
+  max_ns_delay = (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N);
 
   // Prepare constants:
   ld_bbits = lg2(nmin);
@@ -638,34 +652,20 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
   // Get d_factor_found, into the thread'th factor_found array.
-  if(blocking_sync_ok) {
-    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
-    checkCUDAErr("getting factors found");
-  } else {
-    cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
-    if(*check_ns_delay > (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N)) {
-      bmsg("Sleep-wait failed, switching to busy-wait.\nYou should *really* update your drivers!\n");
-      blocking_sync_ok = true;
-    }
-  }
+  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+  checkCUDAErr("getting factors found");
   cudaEventRecord(stop, stream);
   checkCUDAErr("cudaEventRecord");
-
-  while(cudaEventQuery(stop) == cudaErrorNotReady){
-    usleep(1000);
+  if(*check_ns_delay <= max_ns_delay) {
+    cudaSleepWait(stop, check_ns_delay, check_ns_overlap, start_t);
+  } else {
+    while(cudaEventQuery(stop) == cudaErrorNotReady){
+      usleep(1000);
+    }
   }
+  checkCUDAErr("waiting for factors found");
+
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
 #endif
-}
-
-void cuda_finalize(void) {
-  //cudaFree(d_bitsskip);
-  //cudaFree(d_N);
-  cudaFree(d_K);
-  cudaFree(d_Ps);
-  cudaFree(d_P);
-  cudaFree(d_factor_found);
-  cudaEventDestroy(stop);
-  cudaStreamDestroy(stream);
 }

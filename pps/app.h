@@ -16,7 +16,7 @@
 #include "stdint.h"
 
 
-#define APP_VERSION "cuda-0.1.3f"
+#define APP_VERSION "cuda-0.1.4"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -29,7 +29,7 @@
 
 #define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:"
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
@@ -38,7 +38,8 @@
   {"input",         required_argument, 0, 'i'}, \
   {"factors",       required_argument, 0, 'f'}, \
   {"device",        required_argument, 0, 'd'}, \
-  {"bitsatatime",   required_argument, 0, 'b'},
+  {"bitsatatime",   required_argument, 0, 'b'}, \
+  {"mthreads",      required_argument, 0, 'm'},
 
 void app_banner(void);
 int app_parse_option(int opt, char *arg, const char *source);
