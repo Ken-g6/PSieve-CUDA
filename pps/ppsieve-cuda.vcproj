@@ -150,6 +150,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="cudart.lib cuda.lib"
+				OutputFile="$(OutDir)\ppsieve-cuda-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
 				GenerateDebugInformation="true"
@@ -450,6 +451,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\factor_proth.c"
+				>
+			</File>
+			<File
 				RelativePath=".\getopt.c"
 				>
 			</File>
@@ -489,6 +494,10 @@
 			</File>
 			<File
 				RelativePath=".\do_boinc_init.h"
+				>
+			</File>
+			<File
+				RelativePath=".\factor_proth.h"
 				>
 			</File>
 			<File

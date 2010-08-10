@@ -39,6 +39,7 @@
 #include "app.h"
 #include "appcu.h"
 #include "clock.h"
+#include "factor_proth.h"
 #ifdef __GCC__
 #define INLINE static inline
 #else
@@ -159,7 +160,7 @@ test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
           (khigh >= (1<<(32-12)) || ((unsigned int)(((k<<(n%12))+(uint64_t)c)%(uint64_t)13) != 0 &&
           (khigh >= (1<<(32-18)) || ((unsigned int)(((k<<(n%18))+(uint64_t)c)%(uint64_t)19) != 0
           )))))))))))
-        if((unsigned int)(mod31%(uint64_t)31) != 0)
+        if((unsigned int)(mod31%(uint64_t)31) != 0 && try_all_factors(k, n, c) == 0)
           report_factor(p,k,n,c);
     } else {
       if (bitmap[n-nmin][(unsigned int)((b-b0)/8)] & (1<<(b-b0)%8))
@@ -539,7 +540,7 @@ void app_help(void)
 }
 
 // find the log base 2 of a number.  Need not be fast; only done twice.
-int lg2(uint64_t v) {
+static int lg2(uint64_t v) {
 	int r = 0; // r will be lg(v)
 
 	while (v >>= 1) r++;
@@ -638,7 +639,7 @@ void app_init(void)
       read_abcd_file(input_filename, file);
     else /* if (file_format == FORMAT_NEWPGEN) */
       read_newpgen_file(input_filename, file);
-  }
+  } else sieve_small_primes(11);
 
   if (factors_filename == NULL)
     factors_filename = FACTORS_FILENAME_DEFAULT;
@@ -707,7 +708,7 @@ unsigned int app_thread_init(int th)
 /*  Multiplies for REDC code  */
 
 #if defined(GCC) && defined(__x86_64__)
-uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(uint64_t a, uint64_t b)
 {
   uint64_t t1, t2;
   __asm__
@@ -719,7 +720,7 @@ uint64_t __umul64hi(uint64_t a, uint64_t b)
 }
 #else
 #if defined(GCC) && !defined(__x86_64__)
-unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(unsigned int a, unsigned int b)
 {
   unsigned int t1, t2;
   __asm__
@@ -730,7 +731,7 @@ unsigned int __umulhi(unsigned int a, unsigned int b)
   return t2;
 }
 #else
-unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(unsigned int a, unsigned int b)
 {
   uint64_t c = (uint64_t)a * (uint64_t)b;
 
@@ -738,7 +739,7 @@ unsigned int __umulhi(unsigned int a, unsigned int b)
 }
 #endif
 
-uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(uint64_t a, uint64_t b)
 {
   unsigned int           a_lo = (unsigned int)a;
   uint64_t a_hi = a >> 32;
@@ -756,7 +757,7 @@ uint64_t __umul64hi(uint64_t a, uint64_t b)
 
 /*  BEGIN REDC CODE  */
 
-uint64_t invmod2pow_ul (const uint64_t n)
+static uint64_t invmod2pow_ul (const uint64_t n)
 {
   uint64_t r;
   //unsigned int ir;
@@ -777,7 +778,7 @@ uint64_t invmod2pow_ul (const uint64_t n)
   return r;
 }
 
-uint64_t mulmod_REDC (const uint64_t a, const uint64_t b, 
+static uint64_t mulmod_REDC (const uint64_t a, const uint64_t b, 
              const uint64_t N, const uint64_t Ns)
 {
   uint64_t rax, rcx;
@@ -805,7 +806,7 @@ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
 
 // mulmod_REDC(1, 1, N, Ns)
 // But note that mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
+static uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
   uint64_t rcx;
 
   // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
@@ -818,13 +819,13 @@ uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
 }
 
 // Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) {
+static uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) {
   return onemod_REDC(N, Ns*a);
 }
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
-uint64_t shiftmod_REDC (const uint64_t a, 
+static uint64_t shiftmod_REDC (const uint64_t a, 
              const uint64_t N, uint64_t rax)
 {
   uint64_t rcx;
@@ -850,7 +851,7 @@ uint64_t shiftmod_REDC (const uint64_t a,
 
 // Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
 /* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
-uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
+static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   uint64_t r;
   int bbits = ld_bbits;
 

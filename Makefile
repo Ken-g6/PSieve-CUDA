@@ -1,10 +1,11 @@
-all: do_pps do_pps_boinc
+all:
+	cd pps; make
 
 do_pps:
-	cd pps; bash ./make-bins.sh
+	cd pps; make non-boinc
 
 do_pps_boinc:
-	cd pps; bash ./make-bins.sh boinc
+	cd pps; make boinc
 
 clean:
-	rm pps/ppsieve-boinc-x86*-linux pps/ppsieve-x86*-linux pps/ppsieve-x86*-windows.exe
+	cd pps; make clean
