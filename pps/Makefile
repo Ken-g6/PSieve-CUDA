@@ -16,9 +16,9 @@ NVCC = nvcc
 # Flags:
 # Uncomment to use device emulation:
 #DOEMU = -deviceemu -D_DEVICEEMU -g
-COMMON_FLAGS = -O3 $(DOEMU) -DNDEBUG -D_REENTRANT -I. -I..
+COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
 CFLAGS = -fomit-frame-pointer -s $(COMMON_FLAGS)
-NVCFLAGS = --ptxas-options=-v $(COMMON_FLAGS)
+NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 BOINC64_LINK = $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 BOINC_LINK = $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
