@@ -51,7 +51,7 @@ $(APPNAME)-src.zip: $(BINS) gitstatus changes
 	cd .. ; zip -9 $(APPPATH)/$(APPNAME)-src.zip Makefile $(APPPATH)/Makefile *.txt *.[ch] *.cpp *.sln $(APPPATH)/*.[ch] $(APPPATH)/*.cu $(APPPATH)/README.txt $(APPPATH)/CHANGES.txt $(APPPATH)/*config.txt $(APPPATH)/make-*.sh $(APPPATH)/$(APPNAME).sh $(APPPATH)/*.bat vc/*
 
 gitstatus:
-	git status
+	git status | grep nothing > /dev/null || git status
 
 changes:
 	git log | grep "^\(    \|Date:\)" > CHANGES.txt
