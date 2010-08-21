@@ -56,10 +56,10 @@
 //#include "diagnostics.h"
 #include "filesys.h"
 #else
-#include "BOINC/boinc_api.h"
-//#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
+#include "boinc_api.h"
+//#include "diagnostics.h"     // boinc_init_diagnostics()
 // Note: filesys.h has some improperly #ifdef-ed C++ #includes, when building on Win32 with MinGW/MSys.
-#include "BOINC/filesys.h"         // boinc_fopen(), etc...
+#include "filesys.h"         // boinc_fopen(), etc...
 #endif
 #include "do_boinc_init.h"
 #endif
@@ -69,6 +69,7 @@
 int num_threads = 1;
 uint64_t pmin = 0, pmax = 0;
 unsigned int quiet_opt = 0;
+unsigned int priority_opt = 0;
 
 /* Local variables */
 static uint64_t pstart;
@@ -82,7 +83,6 @@ static unsigned int blocks_opt = BLOCKS_OPT_DEFAULT;
 static sieve_t *sv;
 static unsigned int report_opt = REPORT_OPT_DEFAULT;
 static unsigned int checkpoint_opt = CHECKPOINT_OPT_DEFAULT;
-static unsigned int priority_opt = 0;
 
 static uint64_t cand_count = 0;
 static uint64_t cand_sum = 0;
@@ -687,8 +687,8 @@ static void *thread_fun(void *arg)
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
 #ifdef USE_BOINC
-  SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
-  SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
+  //SetPriorityClass(GetCurrentProcess(), NORMAL_PRIORITY_CLASS);
+  //SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_NORMAL);
 #else
   if (priority_opt)
   {
@@ -894,14 +894,14 @@ int main(int argc, char *argv[])
   uint64_t pstop;
   int th, process_ret = EXIT_SUCCESS;
 
-#ifdef USE_BOINC
-  boincordie(do_boinc_init(), "BOINC initialization failed!\n");
-#endif
   program_start_time = elapsed_usec();
   app_banner();
 
   read_config_file(CONFIG_FILENAME);
   process_args(argc,argv);
+#ifdef USE_BOINC
+  boincordie(do_boinc_init(), "BOINC initialization failed!\n");
+#endif
 #ifdef USE_BOINC
   // Get the priority.
   //priority_opt = getThreadPriority();

@@ -46,6 +46,7 @@
 #define INLINE static __inline
 #endif
 
+
 #ifndef __x86_64__
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
 // MPOS = result (32-bit)
@@ -182,7 +183,7 @@ static FILE* scan_input_file(const char *fn)
   if ((file = bfopen(fn,"r")) == NULL)
   {
     perror(fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_FOPEN);
   }
 
 
@@ -199,13 +200,13 @@ static FILE* scan_input_file(const char *fn)
     if (fscanf(file," %"SCNu64" %u",&k,&n) != 2)
     {
       fprintf(stderr,"%sInvalid line 2 in input file `%s'\n",bmprefix(),fn);
-      bexit(EXIT_FAILURE);
+      bexit(ERR_SCANF);
     }
   }
   else
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
 
   k0 = k1 = k;
@@ -277,7 +278,7 @@ static FILE* scan_input_file(const char *fn)
   if (ferror(file))
   {
     fprintf(stderr,"%sError reading input file `%s'\n",bmprefix(),fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
 
   rewind(file);
@@ -313,14 +314,14 @@ static void read_newpgen_file(const char *fn, FILE* file)
     if ((file = bfopen(fn,"r")) == NULL)
     {
       perror(fn);
-      bexit(EXIT_FAILURE);
+      bexit(ERR_FOPEN);
     }
   }
 
   if (fscanf(file," %"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) != 2)
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
 
   line = 0;
@@ -331,7 +332,7 @@ static void read_newpgen_file(const char *fn, FILE* file)
     if ((k&1) != 1)
     {
       fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
-      bexit(EXIT_FAILURE);
+      bexit(ERR_SCANF);
     }
     if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
     {
@@ -344,7 +345,7 @@ static void read_newpgen_file(const char *fn, FILE* file)
   if (ferror(file))
   {
     fprintf(stderr,"%sError reading input file `%s'\n",bmprefix(),fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
 
   //rewind(file);
@@ -365,14 +366,14 @@ static void read_abcd_file(const char *fn, FILE *file)
     if ((file = bfopen(fn,"r")) == NULL)
     {
       perror(fn);
-      bexit(EXIT_FAILURE);
+      bexit(ERR_FOPEN);
     }
   }
   if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
         &k,&n) != 2)
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
 
   count = 0;
@@ -385,7 +386,7 @@ static void read_abcd_file(const char *fn, FILE *file)
     unsigned int bm8 = (unsigned int)(1 << bit%8);
     /*if(k < kmin || k > kmax || bit < 0 || bit > (kmax-kmin)/2) {
       printf("\n\nK error: K = %"SCNu64", which is outside %"SCNu64" - %"SCNu64"\n\n\n", k, kmin, kmax);
-      bexit(EXIT_FAILURE);
+      bexit(ERR_INVALID_PARAM);
     }*/
     if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
     count++;
@@ -408,7 +409,7 @@ static void read_abcd_file(const char *fn, FILE *file)
       /*if(n > nmax) {
         printf("\n\nN error: N = %u, but nmax = %u\n\n\n", n, nmax);
         if(file == NULL) printf("\n\nError: File was closed!\n");
-        bexit(EXIT_FAILURE);
+        bexit(ERR_INVALID_PARAM);
       }*/
       if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
       count++;
@@ -428,7 +429,7 @@ static void read_abcd_file(const char *fn, FILE *file)
   if (ferror(file))
   {
     printf("\nError reading input file `%s'\n",fn);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_SCANF);
   }
   //printf("\n\nDone reading ABCD file!\n");
 
@@ -558,7 +559,7 @@ void app_init(void)
   if (input_filename == NULL && (kmin == 0 || kmax == 0))
   {
     bmsg("Please specify an input file or all of kmin, kmax, and nmax\n");
-    bexit(EXIT_FAILURE);
+    bexit(ERR_INVALID_PARAM);
   }
 
   if (input_filename != NULL
@@ -568,19 +569,19 @@ void app_init(void)
   if (kmin > kmax)
   {
     bmsg("kmin <= kmax is required\n");
-    bexit(EXIT_FAILURE);
+    bexit(ERR_INVALID_PARAM);
   }
 
   if (kmax >= pmin)
   {
     bmsg("kmax < pmin is required\n");
-    bexit(EXIT_FAILURE);
+    bexit(ERR_INVALID_PARAM);
   }
 
   if (kmax-kmin >= (UINT64_C(3)<<36))
   {
     bmsg("kmax-kmin < 3*2^36 is required\n");
-    bexit(EXIT_FAILURE);
+    bexit(ERR_INVALID_PARAM);
   }
 
   if (nmin == 0)
@@ -593,7 +594,7 @@ void app_init(void)
     nmin = 2*lg2(pmin)-lg2(kmax)-1;
 
     //bmsg("Please specify a value for nmin\n");
-    //bexit(EXIT_FAILURE);
+    //bexit(ERR_INVALID_PARAM);
   }
 
   if (nmax == 0)
@@ -602,7 +603,7 @@ void app_init(void)
   if (nmin > nmax)
   {
     bmsg("nmin <= nmax is required\n");
-    bexit(EXIT_FAILURE);
+    bexit(ERR_INVALID_PARAM);
   }
 
   b0 = kmin/2;
@@ -646,7 +647,7 @@ void app_init(void)
   if ((factors_file = bfopen(factors_filename,"a")) == NULL)
   {
     fprintf(stderr,"%sCannot open factors file `%s'\n",bmprefix(),factors_filename);
-    bexit(EXIT_FAILURE);
+    bexit(ERR_FOPEN);
   }
 
   // Allocate the bitsskip arrays.
@@ -797,7 +798,7 @@ static uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
   if (longmod (rax, 0, N) != mulmod(a, b, N))
   {
     fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
-    bexit(1);
+    bexit(ERR_NEG);
   }
 #endif
 
@@ -842,7 +843,7 @@ static uint64_t shiftmod_REDC (const uint64_t a,
   if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
   {
     fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
-    bexit(1);
+    bexit(ERR_NEG);
   }
 #endif
 
@@ -905,7 +906,7 @@ void test_one_p(const uint64_t my_P) {
   assert(kpos == onemod_REDC(my_P, kPs));
   if(kpos != onemod_REDC(my_P, kPs)) {
     fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
-    //bexit(1);
+    //bexit(ERR_NEG);
   } */
 
   if(search_proth) k0 = my_P-k0;
@@ -932,7 +933,7 @@ void test_one_p(const uint64_t my_P) {
   if(cands_found == 0) {
     fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
 #ifdef USE_BOINC
-    bexit(1);
+    bexit(ERR_NEG);
 #endif
   }
 }

@@ -160,7 +160,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
     bmsg("Error: PMin is too small, <= 2^32!\n");
-    bexit(1);
+    bexit(ERR_INVALID_PARAM);
   }
   blocking_sync_ok = SetCUDABlockingSync(gpuno);
   if(blocking_sync_ok == false) bmsg("Blocking sync setup failed; try upgrading your drivers.\n");
@@ -185,19 +185,19 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
 #ifdef USE_BOINC
-    bexit(1);
+    bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
     return 0;
 #endif
   }
   // Calculate ld_bitsatatime given memory constraints, and possibly nmin-nmax via nstep vs. 2^ld_bitsatatime
   // Things change if nmax-nmin < 1000000 or so, but for now let's go with a constant maximum of ld_bitsatatime<=13.
-  i = gpuprop.totalGlobalMem/sizeof(uint64_t); // Total number of 64-bit numbers that can be stored.
+  //i = gpuprop.totalGlobalMem/sizeof(uint64_t); // Total number of 64-bit numbers that can be stored.
   //ld_bitsatatime = BITSATATIME;
   //ld_bitsmask = BITSMASK+1;
 
   // Allocate device arrays:
-  // TODO: fix this awkward construct.
+  i=0;  // Iterate some number of times if not enough memory yet.
   while(1) {
     // - d_bitsskip[] (Biggest array first.)
     //if(cudaMalloc((void**)&d_bitsskip, ld_bitsmask*cthread_count*sizeof(uint64_t)) == cudaSuccess) {
@@ -228,11 +228,16 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
+    if((++i) >= 86) {
 #ifdef USE_BOINC
-    bexit(1);
+      bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
-    return 0;
+      return 0;
 #endif
+    } else {
+      sleep(7);
+      bmsg("Trying again...");
+    }
   }
 
   //ld_bitsmask--; // Finalize bitsmask
@@ -243,7 +248,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
     bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
-    bexit(1);
+    bexit(ERR_INVALID_PARAM);
   }
   // Set the constants.
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
@@ -254,7 +259,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   //assert(d_r0 <= 32);
   if(ld_bbits < 6) {
     fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
-    bexit(1);
+    bexit(ERR_INVALID_PARAM);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
   // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
@@ -421,7 +426,7 @@ __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
   if (longmod (rax, 0, N) != mulmod(a, b, N))
   {
     fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
-    bexit(1);
+    bexit(ERR_NEG);
   }
 #endif
 
@@ -456,7 +461,7 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
 
   if (longmod (r, 0, N) != mulmod(a, 1, N)) {
     fprintf (stderr, "%sError, redc(%lu,%lu) = %lu\n", bmprefix(), a, N, r);
-    bexit(1);
+    bexit(ERR_NEG);
   }
 
   return r;
@@ -490,7 +495,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
   {
     fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
-    bexit(1);
+    bexit(ERR_NEG);
   }
 #endif
 

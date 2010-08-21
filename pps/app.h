@@ -16,7 +16,7 @@
 #include "stdint.h"
 
 
-#define APP_VERSION "cuda-0.1.5"
+#define APP_VERSION "cuda-0.1.5a"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -40,6 +40,13 @@
   {"device",        required_argument, 0, 'd'}, \
   {"bitsatatime",   required_argument, 0, 'b'}, \
   {"mthreads",      required_argument, 0, 'm'},
+
+// Error codes, matching BOINC's.
+#define ERR_FOPEN -108
+#define ERR_SCANF -140
+#define ERR_INVALID_PARAM -178
+#define ERR_NEG -117
+#define ERR_INSUFFICIENT_RESOURCE -198
 
 void app_banner(void);
 int app_parse_option(int opt, char *arg, const char *source);

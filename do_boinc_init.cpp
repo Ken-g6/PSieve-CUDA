@@ -17,6 +17,7 @@
 #include "BOINC/boinc_api.h"
 #include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
 #endif
+#include "main.h"
 #include "do_boinc_init.h"
 
 int do_boinc_init() {
@@ -31,7 +32,7 @@ int do_boinc_init() {
   }
   boinc_options_defaults(options);
 #ifdef _WIN32
-  options.normal_thread_priority = 1;
+  if(priority_opt < 14) options.normal_thread_priority = 1;
 #endif
   return boinc_init_options(&options);
 }

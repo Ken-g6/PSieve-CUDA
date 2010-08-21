@@ -56,6 +56,7 @@ void bexit(int status);
 extern int num_threads; /* Excluding parent thread */
 extern uint64_t pmin, pmax;
 extern unsigned int quiet_opt;
+extern unsigned int priority_opt;
 #ifdef __cplusplus
 }
 #endif
