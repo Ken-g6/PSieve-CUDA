@@ -355,6 +355,7 @@
 			/>
 			<Tool
 				Name="CUDA Build Rule"
+				Include="&quot;..\boinc\lib&quot;"
 				Defines="NDEBUG;USE_BOINC"
 			/>
 			<Tool
