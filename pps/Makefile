@@ -26,16 +26,19 @@ LINK = -lm -lpthread # -lcuda
 # Uncomment this line if BOINC is in a user-specified directory.
 #BOINC_DIR = /downloads/distributed/boinc610/server_stable
 ifdef BOINC_DIR
-# This line includes where some repositories put the BOINC includes:
-BOINC_LOAD_LIBS = -I/usr/include/BOINC
-else
 BOINC_API_DIR = $(BOINC_DIR)/api
 BOINC_LIB_DIR = $(BOINC_DIR)/lib
-BOINC_LOAD_LIBS = -I$(BOINC_DIR) -I$(BOINC_LIB_DIR) -I$(BOINC_API_DIR) -L$(BOINC_DIR) -L$(BOINC_LIB_DIR) -L$(BOINC_API_DIR)
+BOINC_LOAD_LIBS = -I$(BOINC_DIR) -I$(BOINC_LIB_DIR) -I$(BOINC_API_DIR)
+BOINC_LINK_LIBS = -L$(BOINC_DIR) -L$(BOINC_LIB_DIR) -L$(BOINC_API_DIR)
+else
+# This line includes where some repositories put the BOINC includes:
+BOINC_LOAD_LIBS = -I/usr/include/BOINC
 endif
+BOINC_CFLAGS = -DUSE_BOINC $(CFLAGS) $(BOINC_LOAD_LIBS)
+BOINC_NVCFLAGS = -DUSE_BOINC $(NVCFLAGS) $(BOINC_LOAD_LIBS)
 
-BOINC64_LINK = $(BOINC_LOAD_LIBS) -DUSE_BOINC $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
-BOINC_LINK = $(BOINC_LOAD_LIBS) -DUSE_BOINC $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+BOINC64_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 #nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 
 # Make-able targets:
@@ -68,13 +71,13 @@ $(APPNAME)-x86-linux: $(OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)
 
 $(APPNAME)-boinc-x86-linux: $(BOINC_OBJS)
-	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(BOINC_LINK)
+	$(NVCC) -m32 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK)
 
 $(APPNAME)-x86_64-linux: $(OBJS64)
 	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK)
 
 $(APPNAME)-boinc-x86_64-linux: $(BOINC64_OBJS)
-	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(BOINC64_LINK)
+	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC64_LINK)
 
 # OBJS
 ../main.o: ../main.c ../main.h
@@ -95,22 +98,22 @@ appcu.o: appcu.cu appcu.h
 
 # BOINC_OBJS
 ../do_boinc_init.o: ../do_boinc_init.cpp ../do_boinc_init.h
-	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $<
+	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $<
 
 ../main_boinc.o: ../main.c ../main.h
-	$(CC32) -o $@ $(CFLAGS) $<
+	$(CC32) -o $@ $(BOINC_CFLAGS) $<
 
 ../putil_boinc.o: ../putil.c ../putil.h
-	$(CC32) -o $@ $(CFLAGS) $<
+	$(CC32) -o $@ $(BOINC_CFLAGS) $<
 
 ../sieve_boinc.o: ../sieve.c ../sieve.h
-	$(CC32) -o $@ $(CFLAGS) $<
+	$(CC32) -o $@ $(BOINC_CFLAGS) $<
 
 app_boinc.o: app.c app.h
-	$(CC32) -o $@ $(CFLAGS) $<
+	$(CC32) -o $@ $(BOINC_CFLAGS) $<
 
 appcu_boinc.o: appcu.cu appcu.h
-	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $<
+	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $<
 
 #  COMMON_OBJS
 ../clock.o: ../clock.c ../clock.h
@@ -141,22 +144,22 @@ appcu64.o: appcu.cu appcu.h
 
 # BOINC64_OBJS
 ../do_boinc_init64.o: ../do_boinc_init.cpp ../do_boinc_init.h
-	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $<
+	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $<
 
 ../main_boinc64.o: ../main.c ../main.h
-	$(CC64) -o $@ $(CFLAGS) $<
+	$(CC64) -o $@ $(BOINC_CFLAGS) $<
 
 ../putil_boinc64.o: ../putil.c ../putil.h
-	$(CC64) -o $@ $(CFLAGS) $<
+	$(CC64) -o $@ $(BOINC_CFLAGS) $<
 
 ../sieve_boinc64.o: ../sieve.c ../sieve.h
-	$(CC64) -o $@ $(CFLAGS) $<
+	$(CC64) -o $@ $(BOINC_CFLAGS) $<
 
 app_boinc64.o: app.c app.h
-	$(CC64) -o $@ $(CFLAGS) $<
+	$(CC64) -o $@ $(BOINC_CFLAGS) $<
 
 appcu_boinc64.o: appcu.cu appcu.h
-	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $<
+	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $<
 
 
 #  COMMON64_OBJS
