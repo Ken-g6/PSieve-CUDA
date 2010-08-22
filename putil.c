@@ -20,6 +20,7 @@
 
 #ifdef USE_BOINC
 #include "boinc_api.h"
+#include "error_numbers.h"
 #endif
 
 void *xmalloc(size_t size)
@@ -30,7 +31,7 @@ void *xmalloc(size_t size)
   {
     perror("malloc");
 #ifdef USE_BOINC
-    boinc_finish(EXIT_FAILURE);
+    boinc_finish(ERR_INSUFFICIENT_RESOURCE);
 #else
     exit(EXIT_FAILURE);
 #endif
@@ -47,7 +48,7 @@ void *xrealloc(void *mem, size_t size)
   {
     perror("realloc");
 #ifdef USE_BOINC
-    boinc_finish(EXIT_FAILURE);
+    boinc_finish(ERR_INSUFFICIENT_RESOURCE);
 #else
     exit(EXIT_FAILURE);
 #endif

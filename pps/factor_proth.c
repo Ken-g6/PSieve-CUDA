@@ -14,6 +14,9 @@
 #include "stdint.h"
 #include "inttypes.h"
 #include "factor_proth.h"
+#ifdef DEBUG64
+#include "main.h"
+#endif
 #define MAX_SIEVE (32780/2)
 // Global array (local to this file) of small primes:
 static int small_primes[3514];
@@ -137,7 +140,7 @@ static unsigned int mulmod_REDC (const unsigned int a, const unsigned int b,
   if ((unsigned int)(rax<<16)%(unsigned int)N != (a*b)%(unsigned int)N)
   {
     fprintf (stderr, "Error, mulredc(%u,%u,%u) = %u\n", a, b, N, rax);
-    exit(1);
+    bexit(1);
   }
 #endif
 
@@ -177,7 +180,7 @@ static unsigned int mod_REDC(const unsigned short int a, const unsigned short in
 
   if ((unsigned int)(r<<16)%(unsigned int)N != (a)%(unsigned int)N) {
     fprintf (stderr, "Error, redc(%lu,%lu) = %lu\n", a, N, r);
-    exit(1);
+    bexit(1);
   }
 
   return r;
@@ -207,7 +210,7 @@ static unsigned int invpowmod_REDClr (const unsigned int N, const unsigned short
 #ifdef DEBUG64
   if(r != inv2powmod(N, P)) {
     fprintf (stderr, "Error, inv2powmod(%u,%u) == %u, not %u\n", N, P, inv2powmod(N, P), r);
-    exit(1);
+    bexit(1);
   }
 #endif
 
@@ -226,7 +229,7 @@ static int try_factor(uint64_t K, unsigned int N, int sign, unsigned int p) {
   /*
      if(bbits < 4) {
      fprintf(stderr, "Error: N too small at %d (must be at least 16).\n", N);
-     exit(1);
+     bexit(1);
      }
      */
   // r = 2^-i * 2^16 (mod P)

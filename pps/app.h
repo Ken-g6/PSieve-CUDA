@@ -41,12 +41,17 @@
   {"bitsatatime",   required_argument, 0, 'b'}, \
   {"mthreads",      required_argument, 0, 'm'},
 
+#ifdef USE_BOINC
+#include <error_numbers.h>
+#else
 // Error codes, matching BOINC's.
 #define ERR_FOPEN -108
 #define ERR_SCANF -140
 #define ERR_INVALID_PARAM -178
 #define ERR_NEG -117
 #define ERR_INSUFFICIENT_RESOURCE -198
+#define ERR_NOT_IMPLEMENTED -150
+#endif
 
 void app_banner(void);
 int app_parse_option(int opt, char *arg, const char *source);

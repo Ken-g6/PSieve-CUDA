@@ -134,6 +134,11 @@ bool SetCUDABlockingSync(int device) {
   return true;
 }
 
+static void sleep_for_server() {
+  //bmsg("Sleeping 10 minutes to give the server a break.\n");
+  //sleep(600);
+}
+
 /* This function is called once before any threads are started.
  */
 unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
@@ -151,8 +156,9 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
-    checkCUDAErr("getting device properties");
-    bexit(1);
+    fprintf(stderr, "Cuda error: getting device properties: %s\n", cudaGetErrorString(cudaGetLastError()));
+    sleep_for_server();
+    bexit(ERR_NOT_IMPLEMENTED);
 #else
     return 0;
 #endif
@@ -167,6 +173,14 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   //  cudaSetDevice(gpuno);
   fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop.name);
   fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop.major, gpuprop.minor);
+#ifndef _DEVICEEMU
+  if(gpuprop.major == 9999 && gpuprop.minor == 9999) {
+    bmsg("Detected emulator!  We can't use that!\n");
+    sleep_for_server();
+    bexit(ERR_NOT_IMPLEMENTED);  // System call not implemented on this platform: it's a CPU, not a GPU!
+  }
+#endif
+    
   fprintf(stderr, "%sDetected %d multiprocessors.\n", bmprefix(), gpuprop.multiProcessorCount);
   //fprintf(stderr, "%sDetected %lu bytes of device memory.\n", bmprefix(), gpuprop.totalGlobalMem);
 
@@ -228,16 +242,18 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
-    if((++i) >= 86) {
+    //if((++i) >= 86) {
 #ifdef USE_BOINC
       bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
       return 0;
 #endif
+/*
     } else {
       sleep(7);
       bmsg("Trying again...");
     }
+*/
   }
 
   //ld_bitsmask--; // Finalize bitsmask
@@ -248,6 +264,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
     bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    cuda_finalize();
     bexit(ERR_INVALID_PARAM);
   }
   // Set the constants.
@@ -259,6 +276,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   //assert(d_r0 <= 32);
   if(ld_bbits < 6) {
     fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+    cuda_finalize();
     bexit(ERR_INVALID_PARAM);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
@@ -426,6 +444,7 @@ __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
   if (longmod (rax, 0, N) != mulmod(a, b, N))
   {
     fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
+    cuda_finalize();
     bexit(ERR_NEG);
   }
 #endif
@@ -461,6 +480,7 @@ __device__ uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t 
 
   if (longmod (r, 0, N) != mulmod(a, 1, N)) {
     fprintf (stderr, "%sError, redc(%lu,%lu) = %lu\n", bmprefix(), a, N, r);
+    cuda_finalize();
     bexit(ERR_NEG);
   }
 
@@ -495,6 +515,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
   {
     fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    cuda_finalize();
     bexit(ERR_NEG);
   }
 #endif

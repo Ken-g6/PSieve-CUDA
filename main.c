@@ -177,7 +177,7 @@ static void fini_signals(void)
 void boincordie(int res, char *message) {
   if(res) {
     fprintf(stderr, "%s", message);
-    exit(EXIT_FAILURE);
+    bexit(EXIT_FAILURE);
   }
 }
 
