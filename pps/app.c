@@ -37,7 +37,11 @@
 #endif
 #include "putil.h"
 #include "app.h"
+#ifdef USE_OPENCL
+#include "appcl.h"
+#else
 #include "appcu.h"
+#endif
 #include "clock.h"
 #include "factor_proth.h"
 #ifdef __GCC__
@@ -73,10 +77,10 @@
 #define FORMAT_ABCD 2
 
 uint64_t kmin = 0, kmax = 0;
-#ifdef EMM
-static uint64_t xkmax[2] __attribute__((aligned(16)));
-static int sse2_in_range = 0;
-#endif
+//#ifdef EMM
+//static uint64_t xkmax[2] __attribute__((aligned(16)));
+//static int sse2_in_range = 0;
+//#endif
 static uint64_t b0 = 0, b1 = 0;
 static unsigned char **bitmap = NULL;
 static const char *input_filename = NULL;
@@ -89,7 +93,7 @@ static int file_format = FORMAT_ABCD;
 static int print_factors = 1;
 int search_proth = 1; // Search for Proth or Riesel numbers?
 int *check_ns_delay;
-static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
+//static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 //static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
@@ -820,9 +824,11 @@ static uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
 }
 
 // Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
+/*
 static uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) {
   return onemod_REDC(N, Ns*a);
 }
+*/
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.

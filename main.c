@@ -457,7 +457,7 @@ static int parse_option(int opt, char *arg, const char *source)
 
 #ifndef SINGLE_THREAD
     case 't':
-      status = parse_uint(&num_threads,arg,1,MAX_THREADS);
+      status = parse_uint((unsigned int *)&num_threads,arg,1,MAX_THREADS);
       break;
 #endif
 
