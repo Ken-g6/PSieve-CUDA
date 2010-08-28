@@ -247,7 +247,7 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
 
     kpos >>= i;
 #ifdef D_KMAX
-    if (kpos <= D_KMAX) {
+    if (((uint)(kpos >> 32)) == 0 && ((uint)kpos) <= D_KMAX) {
 #else
     if (kpos <= d_kmax) {
 #endif

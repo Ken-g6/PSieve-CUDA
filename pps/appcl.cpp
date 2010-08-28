@@ -439,9 +439,15 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   sprintf(defbuf, "#define D_NMAX (%uu)\n", nmax);
   source += defbuf;
   
+  if(kmin < ((uint64_t)(1u<<31))) {
+    //CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
+    sprintf(defbuf, "#define D_KMIN ((ulong)(%uu))\n", (unsigned int)kmin);
+    source += defbuf;
+  }
+  
   if(kmax < ((uint64_t)(1u<<31))) {
     //CL_MEMCPY_TO_SYMBOL(d_kmax, &kmax, sizeof(kmax));
-    sprintf(defbuf, "#define D_KMAX ((ulong)(%uu))\n", (unsigned int)kmax);
+    sprintf(defbuf, "#define D_KMAX ((%uu))\n", (unsigned int)kmax);
     source += defbuf;
   }
   //CL_MEMCPY_TO_SYMBOL(d_search_proth, &i, sizeof(i));
@@ -486,7 +492,9 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     CL_MEMCPY_TO_SYMBOL(d_kmax, &kmax, sizeof(kmax));
   }
   CL_MEMCPY_TO_SYMBOL(d_r0, &ld_r0, sizeof(ld_r0));
-  CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
+  if(kmin >= ((uint64_t)(1u<<31))) {
+    CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
+  }
 
   return 0;
 }
