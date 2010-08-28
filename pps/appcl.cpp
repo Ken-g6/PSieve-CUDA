@@ -22,6 +22,8 @@
 #include "appcl.h"
 
 #include <unistd.h>
+using namespace std;
+
 
 #define INLINE static inline
 /*
@@ -76,7 +78,7 @@ static size_t global_cthread_count[1];
 static cl_event comp_done_event;
 
 //static bool blocking_sync_ok=true;
-const char *source;
+//const char *source;
 //globals for OpenCL
 /* problem size for a 2D matrix. */
 // Note: we will handle the problem as a 1D matrix.
@@ -265,6 +267,9 @@ const char *convert_to_string(const char *fileName) {
 static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   cl_int status = 0;
   size_t deviceListSize;
+  std::string source = "";
+  char defbuf[80];  // A buffer to store a #define.
+  unsigned int i;
 
   //localThreads[0]  = LOCAL_WORK_SIZE;
   //globalThreads[0] = GLOBAL_WORK_SIZE;
@@ -368,36 +373,8 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   }
 
   /////////////////////////////////////////////////////////////////
-  // Load CL file, build CL program object, create CL kernel object
+  // Set up constants that can be #defined.
   /////////////////////////////////////////////////////////////////
-  source = convert_to_string(KERNELS_FILENAME);
-  size_t sourceSize[]    = { strlen(source) };
-  program = clCreateProgramWithSource(context, 1, &source, sourceSize, &status);
-  if (status != CL_SUCCESS) {
-    fprintf(stderr, "Error: Loading Binary into cl_program (clCreateProgramWithBinary)\n");
-    return 1;
-  }
-
-  /* create a cl program executable for all the devices specified */
-  status = clBuildProgram(program, 1, &devices[deviceno], "-g", NULL, NULL);
-  if (status != CL_SUCCESS)  {
-    fprintf(stderr, "Error: Building Program (clBuildProgram)\n");
-    return 1;
-  }
-
-  /* get a kernel object handle for a kernel with the given name */
-  start_ns_kernel = clCreateKernel(program, "start_ns", &status);
-  if (status != CL_SUCCESS) { 
-    fprintf(stderr, "Error: clCreateKernel (start_ns)\n");
-    return 1;
-  }
-
-  check_more_ns_kernel = clCreateKernel(program, "check_more_ns", &status);
-  if (status != CL_SUCCESS) {
-    fprintf(stderr, "Error: clCreateKernel (check_more_ns)\n");
-    return 1;
-  }
-
   // Knowing the device, we need to calculate how many threads to give it.
   cl_uint compute_units;
   clGetDeviceInfo(devices[deviceno],
@@ -418,6 +395,98 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (*cthread_count/compute_units);
   ld_kernel_nstep *= ld_nstep;
+  if (ld_nstep > (nmax-nmin+1))
+    ld_nstep = (nmax-nmin+1);
+
+  //assert((1ul << (64-nstep)) < pmin);
+  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    bexit(ERR_INVALID_PARAM);
+  }
+  // Set the constants.
+  //CL_MEMCPY_TO_SYMBOL(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
+
+  // Prepare constants:
+  ld_bbits = lg2(nmin);
+  //assert(d_r0 <= 32);
+  if(ld_bbits < 6) {
+    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+    bexit(ERR_INVALID_PARAM);
+  }
+  // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
+  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
+  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
+
+  ld_bbits = ld_bbits-6;
+  //CL_MEMCPY_TO_SYMBOL(d_bbits, &ld_bbits, sizeof(ld_bbits));
+  sprintf(defbuf, "#define D_BBITS (%uu)\n", ld_bbits);
+  source += defbuf;
+  //CL_MEMCPY_TO_SYMBOL(d_nstep, &ld_nstep, sizeof(ld_nstep));
+  sprintf(defbuf, "#define D_NSTEP (%uu)\n", ld_nstep);
+  source += defbuf;
+  // d_mont_nstep is the montgomerized version of nstep.
+  i = 64-ld_nstep;
+  //CL_MEMCPY_TO_SYMBOL(d_mont_nstep, &i, sizeof(i));
+  sprintf(defbuf, "#define D_MONT_NSTEP (%uu)\n", i);
+  source += defbuf;
+  //CL_MEMCPY_TO_SYMBOL(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
+  sprintf(defbuf, "#define D_KERNEL_NSTEP (%uu)\n", ld_kernel_nstep);
+  source += defbuf;
+  //CL_MEMCPY_TO_SYMBOL(d_nmin, &nmin, sizeof(nmin));
+  sprintf(defbuf, "#define D_NMIN (%uu)\n", nmin);
+  source += defbuf;
+  //CL_MEMCPY_TO_SYMBOL(d_nmax, &nmax, sizeof(nmax));
+  sprintf(defbuf, "#define D_NMAX (%uu)\n", nmax);
+  source += defbuf;
+  
+  if(kmax < ((uint64_t)(1u<<31))) {
+    //CL_MEMCPY_TO_SYMBOL(d_kmax, &kmax, sizeof(kmax));
+    sprintf(defbuf, "#define D_KMAX ((ulong)(%uu))\n", (unsigned int)kmax);
+    source += defbuf;
+  }
+  //CL_MEMCPY_TO_SYMBOL(d_search_proth, &i, sizeof(i));
+  if(search_proth == 1)	// search_proth is 1 or -1, not 0.
+    source += "#define D_SEARCH_PROTH 1\n";
+
+
+  /////////////////////////////////////////////////////////////////
+  // Load CL file, build CL program object, create CL kernel object
+  /////////////////////////////////////////////////////////////////
+  source += convert_to_string(KERNELS_FILENAME);
+  const char *source_chars = source.c_str();
+  size_t sourceSize[]    = { strlen(source_chars) };
+  program = clCreateProgramWithSource(context, 1, &source_chars, sourceSize, &status);
+  if (status != CL_SUCCESS) {
+    fprintf(stderr, "Error: Loading Binary into cl_program (clCreateProgramWithBinary)\n");
+    return 1;
+  }
+
+  /* create a cl program executable for all the devices specified */
+  status = clBuildProgram(program, 1, &devices[deviceno], /*"-g"*/ NULL, NULL, NULL);
+  if (status != CL_SUCCESS)  {
+    fprintf(stderr, "Error: Building Program (clBuildProgram)\n");
+    return 1;
+  }
+
+  /* get a kernel object handle for a kernel with the given name */
+  start_ns_kernel = clCreateKernel(program, "start_ns", &status);
+  if (status != CL_SUCCESS) { 
+    fprintf(stderr, "Error: clCreateKernel (start_ns)\n");
+    return 1;
+  }
+
+  check_more_ns_kernel = clCreateKernel(program, "check_more_ns", &status);
+  if (status != CL_SUCCESS) {
+    fprintf(stderr, "Error: clCreateKernel (check_more_ns)\n");
+    return 1;
+  }
+
+  // Constants that are too large to be #defined.  (I think.)
+  if(kmax >= ((uint64_t)(1u<<31))) {
+    CL_MEMCPY_TO_SYMBOL(d_kmax, &kmax, sizeof(kmax));
+  }
+  CL_MEMCPY_TO_SYMBOL(d_r0, &ld_r0, sizeof(ld_r0));
+  CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
 
   return 0;
 }
@@ -426,22 +495,21 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
  */
 unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 {
-  unsigned int i;
   cl_int status = 0;
   //unsigned int ld_bitsatatime = 0;
   //unsigned int ld_halflen=(1<<bitsatatime)/2; 
   //unsigned int ld_bitsmask;
   //unsigned int ld_bpernstep;
 
-  if(initialize_cl(gpuno, &cthread_count)) {
-    bexit(ERR_NOT_IMPLEMENTED);
-  }
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
     bmsg("Error: PMin is too small, <= 2^32!\n");
     bexit(1);
   }
 
+  if(initialize_cl(gpuno, &cthread_count)) {
+    bexit(ERR_NOT_IMPLEMENTED);
+  }
   /*
   if(gpuprop.totalGlobalMem < cthread_count*13) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
@@ -495,45 +563,6 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   }
   CL_SET_BUF_ARG(start_ns_kernel, d_factor_found);
   CL_SET_BUF_ARG(check_more_ns_kernel, d_factor_found);
-
-  //ld_bitsmask--; // Finalize bitsmask
-
-  if (ld_nstep > (nmax-nmin+1))
-    ld_nstep = (nmax-nmin+1);
-
-  //assert((1ul << (64-nstep)) < pmin);
-  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
-    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
-    bexit(ERR_INVALID_PARAM);
-  }
-  // Set the constants.
-  //CL_MEMCPY_TO_SYMBOL(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
-
-  // Prepare constants:
-  ld_bbits = lg2(nmin);
-  //assert(d_r0 <= 32);
-  if(ld_bbits < 6) {
-    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
-    bexit(ERR_INVALID_PARAM);
-  }
-  // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
-  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
-  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
-
-  ld_bbits = ld_bbits-6;
-  CL_MEMCPY_TO_SYMBOL(d_bbits, &ld_bbits, sizeof(ld_bbits));
-  // d_mont_nstep is the montgomerized version of nstep.
-  i = 64-ld_nstep;
-  CL_MEMCPY_TO_SYMBOL(d_mont_nstep, &i, sizeof(i));
-  CL_MEMCPY_TO_SYMBOL(d_r0, &ld_r0, sizeof(ld_r0));
-  CL_MEMCPY_TO_SYMBOL(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
-  CL_MEMCPY_TO_SYMBOL(d_kmax, &kmax, sizeof(kmax));
-  CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
-  CL_MEMCPY_TO_SYMBOL(d_nmin, &nmin, sizeof(nmin));
-  CL_MEMCPY_TO_SYMBOL(d_nmax, &nmax, sizeof(nmax));
-  CL_MEMCPY_TO_SYMBOL(d_nstep, &ld_nstep, sizeof(ld_nstep));
-  i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
-  CL_MEMCPY_TO_SYMBOL(d_search_proth, &i, sizeof(i));
 
   global_cthread_count[0] = cthread_count;
 

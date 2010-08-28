@@ -221,5 +221,5 @@ appcl64.o: appcl.cpp appcl.h
 	$(CL64) -o $@ $(CFLAGS) $<
 
 # Generate the appcl.h file from the .h part and the appcl.cl part.
-appcl.h: appcl.h.start appcl.cl cltoh.pl
-	perl cltoh.pl appcl.cl | cat appcl.h.start - > appcl.h
+appcl.h: appcl_start.h appcl.cl cltoh.pl
+	perl cltoh.pl appcl.cl | cat appcl_start.h - > appcl.h

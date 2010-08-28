@@ -34,28 +34,14 @@
 
 // Constants:
 // start_ns_kernel
-#define ARGNO_d_nmin 4
-#define KERNELOF_d_nmin start_ns_kernel
-#define ARGNO_d_search_proth 5
-#define KERNELOF_d_search_proth start_ns_kernel
-#define ARGNO_d_bbits 6
-#define KERNELOF_d_bbits start_ns_kernel
-#define ARGNO_d_r0 7
+#define ARGNO_d_r0 4
 #define KERNELOF_d_r0 start_ns_kernel
 
 // check_more_ns_kernel
-#define ARGNO_d_nmax 5
-#define KERNELOF_d_nmax check_more_ns_kernel
-#define ARGNO_d_kmin 6
+#define ARGNO_d_kmin 5
 #define KERNELOF_d_kmin check_more_ns_kernel
-#define ARGNO_d_kmax 7
+#define ARGNO_d_kmax 6
 #define KERNELOF_d_kmax check_more_ns_kernel
-#define ARGNO_d_nstep 8
-#define KERNELOF_d_nstep check_more_ns_kernel
-#define ARGNO_d_kernel_nstep 9
-#define KERNELOF_d_kernel_nstep check_more_ns_kernel
-#define ARGNO_d_mont_nstep 10
-#define KERNELOF_d_mont_nstep check_more_ns_kernel
 
 // Sorry, I went a little nuts here.
 // The follwing URL may help decyphering this:

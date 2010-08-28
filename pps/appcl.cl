@@ -114,13 +114,13 @@ ulong mod_REDC(const ulong a, const ulong N, const ulong Ns) {
 // rax is passed in as a * Ns.
 // rax's original value is destroyed, just to keep the register count down.
 ulong shiftmod_REDC (const ulong a, 
-    const ulong N, ulong rax, const uint d_nstep, const uint d_mont_nstep)
+    const ulong N, ulong rax)
 {
   ulong rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
-  rcx = a >> d_nstep;
+  rax <<= D_MONT_NSTEP; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rcx = a >> D_NSTEP;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
   //rax *= Ns;
@@ -135,9 +135,9 @@ ulong shiftmod_REDC (const ulong a,
 
   /*
 #ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, ((ulong)1)<<d_mont_nstep, N))
+  if (longmod (rax, 0, N) != mulmod(a, ((ulong)1)<<D_MONT_NSTEP, N))
   {
-    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, D_MONT_NSTEP, N, rax);
     bexit(1);
   }
 #endif
@@ -148,20 +148,20 @@ ulong shiftmod_REDC (const ulong a,
 
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 ulong
-invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r, const uint d_nmin) {
+invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r) {
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
     // Just keep squaring r.
     r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
-    if(d_nmin & (1u << bbits)) {
+    if(D_NMIN & (1u << bbits)) {
       r += (r&1)?N:0;
       r >>= 1;
     }
   }
 
 #ifdef DEBUG64
-  //assert (mod_REDC (r, N, Ns) == invmod(powmod (d_nmin, N), N));
+  //assert (mod_REDC (r, N, Ns) == invmod(powmod (D_NMIN, N), N));
 #endif
 
   // Convert back to standard.
@@ -176,12 +176,9 @@ invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r, const uint 
 // Start checking N's.
 __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uchar * factor_found_arr,
                                  // Device constants
-                                 const uint d_nmin,		// 4
-                                 const uint d_search_proth,	// 5
-                                 const int d_bbits,		// 6
-                                 const ulong d_r0			// 7
+                                 const ulong d_r0			// 4
                                  ) {
-  uint n = d_nmin; // = nmin;
+  uint n = D_NMIN; // = nmin;
   uint i;
   ulong k0;
   //uchar my_factor_found = 0;
@@ -193,11 +190,13 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
   my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
 
   // Calculate k0, in Montgomery form.
-  k0 = invpowmod_REDClr(my_P, my_Ps, d_bbits, d_r0, d_nmin);
+  k0 = invpowmod_REDClr(my_P, my_Ps, D_BBITS, d_r0);
 
   //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, my_Ps);
 
-  if(d_search_proth) k0 = my_P-k0;
+#ifdef D_SEARCH_PROTH
+  k0 = my_P-k0;
+#endif
 
   //my_factor_found = 0;
   //d_check_some_ns(my_P, my_Ps, k0, n, my_factor_found, i);
@@ -209,14 +208,14 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 }
 
 // Continue checking N's.
-__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uchar * factor_found_arr, const uint N,
+__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uchar * factor_found_arr, const uint N
                                  // Device constants
-                                 const uint d_nmax,		// 5
-                                 const ulong d_kmin,		// 6
-                                 const ulong d_kmax,		// 7
-                                 const uint d_nstep,		// 8
-                                 const uint d_kernel_nstep,	// 9
-                                 const uint d_mont_nstep		// 10
+#ifndef D_KMIN
+                                 , const ulong d_kmin		// 5
+#endif
+#ifndef D_KMAX
+                                 , const ulong d_kmax		// 6
+#endif
                                  ) {
   uint i = get_global_id(0);
   const ulong my_P = P[i];
@@ -225,11 +224,11 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   ulong k0 = K[i];
   uchar my_factor_found = factor_found_arr[i];
   ulong kpos, kPs;
-  uint l_nmax = n + d_kernel_nstep;
-  if(l_nmax > d_nmax) l_nmax = d_nmax;
+  uint l_nmax = n + D_KERNEL_NSTEP;
+  if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
 #ifdef _DEVICEEMU
-  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (uint)k0, d_kernel_nstep);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (uint)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
@@ -247,25 +246,34 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     }
 
     kpos >>= i;
+#ifdef D_KMAX
+    if (kpos <= D_KMAX) {
+#else
     if (kpos <= d_kmax) {
+#endif
 //#ifdef _DEVICEEMU
       //printf("%lu | %lu*2^%u+1 (P[%d])\n", my_P, kpos, n+i, get_global_id(0));
 //#endif
       // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found = 1;
+#ifdef D_KMIN
+      if(kpos >= D_KMIN)
+#else
+      if(kpos >= d_kmin)
+#endif
+        my_factor_found = 1;
     }
 
     // Proceed to the K for the next N.
     // kPs is destroyed, just to keep the register count down.
-    k0 = shiftmod_REDC(k0, my_P, kPs, d_nstep, d_mont_nstep);
-    n += d_nstep;
+    k0 = shiftmod_REDC(k0, my_P, kPs);
+    n += D_NSTEP;
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (uint)k0);
 #endif
   i = get_global_id(0);
   factor_found_arr[i] = my_factor_found;
-  if(n < d_nmax) {
+  if(n < D_NMAX) {
     K[i] = k0;
   }
 }

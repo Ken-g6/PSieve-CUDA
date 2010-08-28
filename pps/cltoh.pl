@@ -1,5 +1,6 @@
 #!/usr/bin/perl
 # Convert OpenCL code to a C-style string.
+# I, the author, Ken Brazier, place this Perl code in the Public Domain.
 use strict;
 
 # Load the code in C++ only (to avoid app.c) and start the string!
@@ -39,14 +40,14 @@ while(<>) {
 	# Remove ifdefs and everything in them.
 	# Dangerous if you #define anything!
 	# Also Dangerous if you use #else.
-	if(/^#if/) {
-		$in_ifdef++;
-		next;
-	}
-	if($in_ifdef > 0) {
-		--$in_ifdef if(/^#endif$/);
-		next;
-	}
+	#if(/^#if/) {
+	#$in_ifdef++;
+	#next;
+	#}
+	#if($in_ifdef > 0) {
+	#--$in_ifdef if(/^#endif$/);
+	#next;
+	#}
 
 	# Escape quotes - vital!
 	s/"/\\"/g;
