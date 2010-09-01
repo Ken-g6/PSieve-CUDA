@@ -1,5 +1,5 @@
 /* ex: set softtabstop=2 shiftwidth=2 expandtab: */
-/* app.cu -- (C) Ken Brazier February 2010.
+/* app.cu -- (C) Ken Brazier February - September 2010.
 
    Proth Prime Search sieve CUDA portion (for many K and many N).
 
@@ -596,6 +596,52 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
 #endif
 }
 
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// Small kmax means testing the low and high bits of kpos separately.
+__device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Get K from the Montgomery form.
+    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    kPs = k0 * Ps;
+    kpos = onemod_REDC(my_P, kPs);
+    //i = __ffsll(kpos)-1;
+    i = (unsigned int)kpos;
+    if(i != 0) {
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
+    } else {
+      i = (unsigned int)(kpos>>32);
+      i=63 - __clz (i & -i);
+    }
+
+    kpos >>= i;
+    // Small kmax means testing the low and high bits of kpos separately.
+    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
+#ifdef _DEVICEEMU
+      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      if(kpos >= d_kmin) my_factor_found = 1;
+    }
+
+    // Proceed to the K for the next N.
+    // kPs is destroyed, just to keep the register count down.
+    k0 = shiftmod_REDC(k0, my_P, kPs);
+    n += d_nstep;
+  } while (n < l_nmax);
+#ifdef _DEVICEEMU
+  if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+
 // *** KERNELS ***
 
 // Start checking N's.
@@ -644,6 +690,22 @@ __global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t 
   }
 }
 
+// Continue checking N's for small kmax.
+__global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr) {
+  unsigned int n = N;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  uint64_t k0 = K[i];
+  unsigned char my_factor_found = factor_found_arr[i];
+
+  d_check_some_ns_small_kmax(P[i], Ps[i], k0, n, my_factor_found, i);
+
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  factor_found_arr[i] = my_factor_found;
+  if(n < d_nmax) {
+    K[i] = k0;
+  }
+}
+
 // *** Host Kernel-calling functions ***
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
@@ -670,9 +732,16 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
-  for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-    d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
-    checkCUDAErr("kernel invocation");
+  if(kmax < (((uint64_t)1)<<31)) {
+    for(n = nmin; n < nmax; n += ld_kernel_nstep) {
+      d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+      checkCUDAErr("kernel invocation");
+    }
+  } else {
+    for(n = nmin; n < nmax; n += ld_kernel_nstep) {
+      d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+      checkCUDAErr("kernel invocation");
+    }
   }
 }
 

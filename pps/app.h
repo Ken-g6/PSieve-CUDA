@@ -16,7 +16,7 @@
 #include "stdint.h"
 
 
-#define APP_VERSION "cuda-0.1.5a"
+#define APP_VERSION "cuda-0.1.5b"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -39,7 +39,8 @@
   {"factors",       required_argument, 0, 'f'}, \
   {"device",        required_argument, 0, 'd'}, \
   {"bitsatatime",   required_argument, 0, 'b'}, \
-  {"mthreads",      required_argument, 0, 'm'},
+  {"mthreads",      required_argument, 0, 'm'}, \
+  {"riesel",        no_argument,       0, 'R'},
 
 #ifdef USE_BOINC
 #include <error_numbers.h>

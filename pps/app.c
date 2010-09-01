@@ -909,7 +909,7 @@ void test_one_p(const uint64_t my_P) {
     //bexit(ERR_NEG);
   } */
 
-  if(search_proth) k0 = my_P-k0;
+  if(search_proth == 1) k0 = my_P-k0;
 
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
