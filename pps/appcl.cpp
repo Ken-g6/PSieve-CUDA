@@ -283,7 +283,8 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   cl_platform_id platform = NULL;
   status = clGetPlatformIDs(0, NULL, &numPlatforms);
   if(status != CL_SUCCESS) {
-    fprintf(stderr, "Error: Getting Platforms. (clGetPlatformsIDs)\n");
+    bmsg("Error: Getting Platforms. (clGetPlatformsIDs)\n");
+    bmsg("Please (re)install OpenCL as described at\nhttp://developer.amd.com/gpu/ATIStreamSDK/assets/ATI_Stream_SDK_Installation_Notes.pdf\n");
     return 1;
   }
 
@@ -292,7 +293,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       malloc(sizeof(cl_platform_id)*numPlatforms);
     status = clGetPlatformIDs(numPlatforms, platforms, NULL);
     if (status != CL_SUCCESS) {
-      fprintf(stderr, "Error: Getting Platform Ids. (clGetPlatformsIDs)\n");
+      bmsg("Error: Getting Platform Ids. (clGetPlatformsIDs)\n");
       return 1;
     }
     for (unsigned int i=0; i < numPlatforms; ++i) {
@@ -303,7 +304,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
           pbuff,
           NULL);
       if (status != CL_SUCCESS) {
-        fprintf(stderr, "Error: Getting Platform Info.(clGetPlatformInfo)\n");
+        bmsg("Error: Getting Platform Info.(clGetPlatformInfo)\n");
         return 1;
       }
       platform = platforms[i];
@@ -315,7 +316,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   }
 
   if(NULL == platform) {
-    fprintf(stderr, "NULL platform found so Exiting Application.\n");
+    bmsg("NULL platform found so Exiting Application.\n");
     return 1;
   }
 
@@ -383,11 +384,23 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       &compute_units,
       NULL);
 
+  if(compute_units < 16) {
+#ifdef USE_BOINC
+    fprintf(stderr, "Device %d looks like an %d-core CPU, not a GPU.  Exiting!\n", deviceno, compute_units);
+    bexit(ERR_INVALID_PARAM);
+#else
+    fprintf(stderr, "Device %d looks like an %d-core CPU, not a GPU.  Adjusting.\n", deviceno, compute_units);
+#endif
+  }
   fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
       bmprefix(), compute_units, compute_units*5, deviceno);
   // 7 wavefronts per SIMD
   // Double this if using ulong2.
-  *cthread_count = compute_units * (7 * BLOCKSIZE);
+  if(compute_units < 16) {
+    *cthread_count = compute_units;
+  } else {
+    *cthread_count = compute_units * (7 * BLOCKSIZE);
+  }
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
