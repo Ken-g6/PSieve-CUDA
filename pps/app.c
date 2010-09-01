@@ -923,7 +923,7 @@ void test_one_p(const uint64_t my_P) {
     if (kpos <= kmax && kpos >= kmin) {
       cands_found++;
       if (i < nstep)
-        test_factor(my_P,kpos,n+i,+1);
+        test_factor(my_P,kpos,n+i,search_proth);
     }
 
     // Proceed to the K for the next N.

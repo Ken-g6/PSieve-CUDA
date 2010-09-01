@@ -29,7 +29,7 @@
 
 #define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
