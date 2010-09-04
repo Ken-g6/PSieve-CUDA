@@ -557,6 +557,9 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
     unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
   uint64_t kpos, kPs;
+/*#ifdef SEARCH_TWIN
+  uint64_t kneg;
+#endif*/
   unsigned int l_nmax = n + d_kernel_nstep;
   if(l_nmax > d_nmax) l_nmax = d_nmax;
 
@@ -568,6 +571,11 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
     kPs = k0 * Ps;
     kpos = onemod_REDC(my_P, kPs);
+#ifdef SEARCH_TWIN
+    // Select the even one here, so as to use the zero count and shift.
+    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
+    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#endif
     //i = __ffsll(kpos)-1;
     i = (unsigned int)kpos;
     if(i != 0) {
@@ -577,7 +585,16 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
       i=63 - __clz (i & -i);
     }
 
-    kpos >>= i;
+    if ((kpos >> i) <= d_kmax) {
+#ifdef _DEVICEEMU
+      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      if((kpos >> i) >= d_kmin) my_factor_found = 1;
+    }
+#ifdef SEARCH_TWIN
+    kpos = my_P - kpos;
+
     if (kpos <= d_kmax) {
 #ifdef _DEVICEEMU
       //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
@@ -585,7 +602,7 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
       // Just flag this if kpos <= d_kmax.
       if(kpos >= d_kmin) my_factor_found = 1;
     }
-
+#endif
     // Proceed to the K for the next N.
     // kPs is destroyed, just to keep the register count down.
     k0 = shiftmod_REDC(k0, my_P, kPs);
@@ -613,6 +630,11 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
     kPs = k0 * Ps;
     kpos = onemod_REDC(my_P, kPs);
+#ifdef SEARCH_TWIN
+    // Select the even one here, so as to use the zero count and shift.
+    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
+    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#endif
     //i = __ffsll(kpos)-1;
     i = (unsigned int)kpos;
     if(i != 0) {
@@ -622,7 +644,19 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
       i=63 - __clz (i & -i);
     }
 
-    kpos >>= i;
+    //kpos >>= i;
+    // Small kmax means testing the low and high bits of kpos separately.
+    if ((((unsigned int)(kpos>>32))>>i) == 0)
+      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
+#ifdef _DEVICEEMU
+      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      if((kpos>>i) >= d_kmin) my_factor_found = 1;
+    }
+#ifdef SEARCH_TWIN
+    kpos = my_P - kpos;
+    // No zeroes on the right here.
     // Small kmax means testing the low and high bits of kpos separately.
     if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
 #ifdef _DEVICEEMU
@@ -631,6 +665,7 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
       // Just flag this if kpos <= d_kmax.
       if(kpos >= d_kmin) my_factor_found = 1;
     }
+#endif
 
     // Proceed to the K for the next N.
     // kPs is destroyed, just to keep the register count down.
@@ -732,7 +767,12 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
-  if(kmax < (((uint64_t)1)<<31)) {
+  if(kmax < (((uint64_t)1)<<31)
+#ifndef SEARCH_TWIN
+      // Also make sure it's worthwhile to make a full shift conditional.  This is worth it 60% of the time on Fermi (and drops a cycle 40% of the time).
+      && P[0] > (((uint64_t)1)<<45)
+#endif
+    ) {
     for(n = nmin; n < nmax; n += ld_kernel_nstep) {
       d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
       checkCUDAErr("kernel invocation");

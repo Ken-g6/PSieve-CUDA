@@ -46,6 +46,13 @@
 #define INLINE static __inline
 #endif
 
+#ifdef SEARCH_TWIN
+#define KSTEP 6
+#define KOFFSET 3
+#else
+#define KSTEP 2
+#define KOFFSET 1
+#endif
 
 #ifndef __x86_64__
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
@@ -143,9 +150,9 @@ static void __attribute__((noinline))
 #endif
 test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
-  uint64_t b = k/2;
+  uint64_t b = k/KSTEP;
 
-  if((k & 1) && n >= nmin && n < nmax) { // k is odd.
+  if((k == KSTEP*b+KOFFSET) && n >= nmin && n < nmax) { // k is odd.
     if (bitmap == NULL) {
       unsigned int khigh = (unsigned int)(k>>32);
       uint64_t mod31 = (uint64_t)1;
@@ -175,9 +182,14 @@ test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 static FILE* scan_input_file(const char *fn)
 {
   FILE *file;
+#ifdef SEARCH_TWIN
+  uint64_t k0, k1, k, d, p0;
+  unsigned int n0, n1, n, m;
+#else
   uint64_t k0, k1, k, p0;
   unsigned int n0, n1, d, n;
-  int filesearch_proth;
+#endif
+  int filesearch_proth = 1;
   char ch;
 
   if ((file = bfopen(fn,"r")) == NULL)
@@ -186,7 +198,13 @@ static FILE* scan_input_file(const char *fn)
     bexit(ERR_FOPEN);
   }
 
-
+#ifdef SEARCH_TWIN
+  search_proth = +1;
+  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+             &m,&n,&k) == 3 && m == n)
+    file_format = FORMAT_ABCD;
+  else if (fscanf(file,"%"SCNu64":T:%*c:2:%c",&p0,&ch) == 2 && ch == '3')
+#else
   if (fscanf(file,"ABCD %"SCNu64"*2^$a%c1 [%u]",
              &k,&ch,&n) == 3)
   {
@@ -194,6 +212,7 @@ static FILE* scan_input_file(const char *fn)
     search_proth = (ch=='+')?1:-1;
   }
   else if (fscanf(file,"%"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) == 2 && (filesearch_proth == 1 || filesearch_proth == -1 || filesearch_proth == 255 || filesearch_proth == 257))
+#endif
   {
     search_proth = (int)((char)filesearch_proth);
     file_format = FORMAT_NEWPGEN;
@@ -230,20 +249,35 @@ static FILE* scan_input_file(const char *fn)
           d *= 10;
           d += c-'0';
         }
+#ifdef SEARCH_TWIN
+        k += d;
+#else
         n += d;
+#endif
         while(c != '\n') c=getc(file);
       }
       //while (fscanf(file," %u",&d) == 1)
 
+#ifdef SEARCH_TWIN
+      if (k1 < k)
+        k1 = k;
+      if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+                 &m,&n,&k) == 3 && m == n)
+      {
+#ifndef USE_BOINC
+        if((((int)n)&15) == 1) printf("\rFound N=%u\r", n);
+#endif
+#else
       if (n1 < n)
         n1 = n;
-
       if (fscanf(file, " ABCD %"SCNu64"*2^$a%c1 [%u]",
                  &k,&ch,&n) == 3)
       {
 #ifndef USE_BOINC
         if((((int)k)&15) == 1) printf("\rFound K=%"SCNu64"\r", k);
 #endif
+#endif
+
         fflush(stdout);
         if (k0 > k)
           k0 = k;
@@ -282,14 +316,15 @@ static FILE* scan_input_file(const char *fn)
   }
 
   rewind(file);
+#ifdef SEARCH_TWIN
+  if (file_format == FORMAT_ABCD)
+  {
+    k0 = KSTEP*k0+KOFFSET;
+    k1 = KSTEP*k1+KOFFSET;
+  }
+#endif
   printf("Found K's from %"SCNu64" to %"SCNu64".\n", k0, k1);
   printf("Found N's from %u to %u.\n", n0, n1);
-
-  //if (file_format == FORMAT_ABCD)
-  //{
-    //k0 = 6*k0+3;
-    //k1 = 6*k1+3;
-  //}
 
   if (kmin < k0)
     kmin = k0;
@@ -308,7 +343,11 @@ static void read_newpgen_file(const char *fn, FILE* file)
   //FILE *file;
   uint64_t k, p0;
   unsigned int n, line, count;
+#ifdef SEARCH_TWIN
+  char ch;
+#else
   int filesearch_proth;
+#endif
 
   if(file == NULL) {
     if ((file = bfopen(fn,"r")) == NULL)
@@ -317,26 +356,33 @@ static void read_newpgen_file(const char *fn, FILE* file)
       bexit(ERR_FOPEN);
     }
   }
-
+#ifdef SEARCH_TWIN
+  if (fscanf(file," %"SCNu64":T:%*c:2:%c",&p0,&ch) != 2 || ch != '3')
+  {
+    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
+    exit(EXIT_FAILURE);
+  }
+#else
   if (fscanf(file," %"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) != 2)
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
     bexit(ERR_SCANF);
   }
+#endif
 
   line = 0;
   count = 0;
   while (fscanf(file," %"SCNu64" %u",&k,&n) == 2)
   {
     line++;
-    if ((k&1) != 1)
+    if ((k%KSTEP) != KOFFSET)
     {
       fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
       bexit(ERR_SCANF);
     }
     if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
     {
-      uint64_t bit = k/2-b0;
+      uint64_t bit = k/KSTEP-b0;
       bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
       count++; /* TODO: Don't count duplicates */
     }
@@ -356,10 +402,13 @@ static void read_newpgen_file(const char *fn, FILE* file)
 
 static void read_abcd_file(const char *fn, FILE *file)
 {
-  //FILE *file;
-  //char buf[80];
+#ifdef SEARCH_TWIN
+  uint64_t k, d;
+  unsigned int n, m, count;
+#else
   uint64_t k;
   unsigned int n, count, d;
+#endif
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
@@ -369,8 +418,13 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_FOPEN);
     }
   }
+#ifdef SEARCH_TWIN
+  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+             &m,&n,&k) != 3 || m != n)
+#else
   if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
         &k,&n) != 2)
+#endif
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
     bexit(ERR_SCANF);
@@ -381,7 +435,11 @@ static void read_abcd_file(const char *fn, FILE *file)
   printf("Reading ABCD file.\n");
   while (1)
   {
-    uint64_t bit = (k-kmin)/2;
+#ifdef SEARCH_TWIN
+    uint64_t bit = k-b0;
+#else
+    uint64_t bit = (k-kmin)/KSTEP;
+#endif
     unsigned int bo8 = (unsigned int)(bit/8);
     unsigned int bm8 = (unsigned int)(1 << bit%8);
     /*if(k < kmin || k > kmax || bit < 0 || bit > (kmax-kmin)/2) {
@@ -391,7 +449,6 @@ static void read_abcd_file(const char *fn, FILE *file)
     if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
     count++;
     while(getc(file) != '\n');
-    //while (fscanf(file," %u",&d) == 1)
     while(1)
     {
       char c = getc(file);
@@ -405,25 +462,34 @@ static void read_abcd_file(const char *fn, FILE *file)
         d += c-'0';
       }
 
+#ifdef SEARCH_TWIN
+      k += d;
+      bit = k-b0;
+      bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
+#else
       n += d;
-      /*if(n > nmax) {
-        printf("\n\nN error: N = %u, but nmax = %u\n\n\n", n, nmax);
-        if(file == NULL) printf("\n\nError: File was closed!\n");
-        bexit(ERR_INVALID_PARAM);
-      }*/
       if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
+#endif
       count++;
       while(c != '\n') c=getc(file);
     }
 #ifndef USE_BOINC
+#ifdef SEARCH_TWIN
+    if((((int)n)&15) == 1) printf("\rRead N=%u\r", n);
+#else
     if((((int)k)&15) == 1) printf("\rRead K=%"SCNu64"\r", k);
+#endif
 #endif
     fflush(stdout);
 
+#ifdef SEARCH_TWIN
+    if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+               &m,&n,&k) != 3 || m != n)
+#else
     if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
-          &k,&n) != 2) {
+          &k,&n) != 2)
+#endif
       break;
-    }
   }
 
   if (ferror(file))
@@ -445,7 +511,11 @@ static void read_abcd_file(const char *fn, FILE *file)
 */
 void app_banner(void)
 {
+#ifdef SEARCH_TWIN
+  printf("tpsieve version " APP_VERSION " (testing)\n");
+#else
   printf("ppsieve version " APP_VERSION " (testing)\n");
+#endif
 #ifdef __GNUC__
   printf("Compiled " __DATE__ " with GCC " __VERSION__ "\n");
 #endif
@@ -606,10 +676,10 @@ void app_init(void)
     bexit(ERR_INVALID_PARAM);
   }
 
-  b0 = kmin/2;
-  b1 = kmax/2;
-  kmin = b0*2+1;
-  kmax = b1*2+1;
+  b0 = kmin/KSTEP;
+  b1 = kmax/KSTEP;
+  kmin = b0*KSTEP+KOFFSET;
+  kmax = b1*KSTEP+KOFFSET;
 
   for (nstep = 1; (kmax << nstep) < pmin; nstep++)
     ;
@@ -885,6 +955,9 @@ void test_one_p(const uint64_t my_P) {
   unsigned int i;
   uint64_t k0, kPs;
   uint64_t kpos;
+#ifdef SEARCH_TWIN
+  uint64_t kneg;
+#endif
   uint64_t Ps;
   int cands_found = 0;
   
@@ -909,22 +982,42 @@ void test_one_p(const uint64_t my_P) {
     //bexit(ERR_NEG);
   } */
 
+#ifndef SEARCH_TWIN
   if(search_proth == 1) k0 = my_P-k0;
+#endif
 
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
     kPs = k0 * Ps;
     kpos = onemod_REDC(my_P, kPs);
-    i = __builtin_ctzll(kpos);
+#ifdef SEARCH_TWIN
+    kneg = my_P - kpos;
+#endif
     //i = __ffsll(kpos)-1;
-
+    i = __builtin_ctzll(kpos);
     kpos >>= i;
+
     if (kpos <= kmax && kpos >= kmin) {
       cands_found++;
       if (i < nstep)
+#ifdef SEARCH_TWIN
+        test_factor(my_P,kpos,n+i,-1);
+#else
         test_factor(my_P,kpos,n+i,search_proth);
+#endif
     }
+
+#ifdef SEARCH_TWIN
+    i = __builtin_ctzll(kneg);
+    kneg >>= i;
+
+    if (kneg <= kmax && kneg >= kmin) {
+      cands_found++;
+      if (i < nstep)
+        test_factor(my_P,kneg,n+i,+1);
+    }
+#endif
 
     // Proceed to the K for the next N.
     k0 = shiftmod_REDC(k0, my_P, kPs);

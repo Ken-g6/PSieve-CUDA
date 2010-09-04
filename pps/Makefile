@@ -1,15 +1,19 @@
+TPS_APPNAME = tpsieve-cuda
 APPNAME = ppsieve-cuda
 APPPATH = pps
 COMMON_OBJS = ../clock.o cuda_sleep_memcpy.o factor_proth.o
 OBJS = ../main.o ../putil.o ../sieve.o app.o appcu.o $(COMMON_OBJS)
+TPSOBJS = ../main.o ../putil.o ../sieve.o tpapp.o tpappcu.o $(COMMON_OBJS)
 BOINC_OBJS = ../do_boinc_init.o ../main_boinc.o ../putil_boinc.o ../sieve_boinc.o app_boinc.o appcu_boinc.o $(COMMON_OBJS)
 COMMON64_OBJS = ../clock64.o cuda_sleep_memcpy64.o factor_proth64.o
 OBJS64 = ../main64.o ../putil64.o ../sieve64.o app64.o appcu64.o $(COMMON64_OBJS)
+TPSOBJS64 = ../main64.o ../putil64.o ../sieve64.o tpapp64.o tpappcu64.o $(COMMON64_OBJS)
 BOINC64_OBJS = ../do_boinc_init64.o ../main_boinc64.o ../putil_boinc64.o ../sieve_boinc64.o app_boinc64.o appcu_boinc64.o $(COMMON64_OBJS)
 BOINC_BINS = $(APPNAME)-boinc-x86-linux $(APPNAME)-boinc-x86_64-linux
 NON_BOINC_BINS = $(APPNAME)-x86-linux $(APPNAME)-x86_64-linux
 # BINS should also have $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86-windows.exe, but those can't be made on Linux. (Yet.)
 BINS = $(NON_BOINC_BINS) $(BOINC_BINS)
+TPS_BINS = $(TPS_APPNAME)-x86-linux $(TPS_APPNAME)-x86_64-linux 
 CC = gcc
 CC32 = $(CC) -c -m32 -march=i586 -mtune=core2
 CC64 = $(CC) -c -m64 -march=k8 -mno-3dnow -mtune=core2
@@ -47,6 +51,9 @@ all: $(BINS)
 # Making zipfiles (requires binaries):
 zips: $(APPNAME).zip $(APPNAME)-src.zip
 
+$(TPS_APPNAME).zip: $(TPS_BINS) gitstatus changes
+	-rm $@ ; zip -9 $(TPS_APPNAME).zip $(TPS_APPNAME)-x86-linux $(TPS_APPNAME)-boinc-x86-linux $(TPS_APPNAME)-x86_64-linux $(TPS_APPNAME)-boinc-x86_64-linux $(TPS_APPNAME)-boinc-x86-windows.exe $(TPS_APPNAME)-x86-windows.exe $(TPS_APPNAME)-boinc-x86_64-windows.exe $(TPS_APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(TPS_APPNAME).sh $(TPS_APPNAME).bat *config.txt license.txt
+
 $(APPNAME).zip: $(BINS) gitstatus changes
 	-rm $@ ; zip -9 $(APPNAME).zip $(APPNAME)-x86-linux $(APPNAME)-boinc-x86-linux $(APPNAME)-x86_64-linux $(APPNAME)-boinc-x86_64-linux $(APPNAME)-boinc-x86-windows.exe $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86_64-windows.exe $(APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(APPNAME).sh $(APPNAME).bat *config.txt license.txt
 
@@ -60,21 +67,29 @@ changes:
 	git log | grep "^\(    \|Date:\)" > CHANGES.txt
 
 # Binaries:
+tps: $(TPS_BINS)
+
 non-boinc: $(NON_BOINC_BINS)
 
 boinc: $(BOINC_BINS)
 
 clean:
-	-rm *.o ../*.o $(BINS) $(APPNAME).zip $(APPNAME)-src.zip
+	-rm *.o ../*.o $(BINS) $(TPS_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
 
 $(APPNAME)-x86-linux: $(OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)
+
+$(TPS_APPNAME)-x86-linux: $(TPSOBJS)
+	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
 
 $(APPNAME)-boinc-x86-linux: $(BOINC_OBJS)
 	$(NVCC) -m32 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK)
 
 $(APPNAME)-x86_64-linux: $(OBJS64)
 	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK)
+
+$(TPS_APPNAME)-x86_64-linux: $(TPSOBJS64)
+	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
 
 $(APPNAME)-boinc-x86_64-linux: $(BOINC64_OBJS)
 	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC64_LINK)
@@ -94,6 +109,12 @@ app.o: app.c app.h
 
 appcu.o: appcu.cu appcu.h
 	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $<
+
+tpapp.o: app.c app.h
+	$(CC32) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+
+tpappcu.o: appcu.cu appcu.h
+	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $< -DSEARCH_TWIN
 
 
 # BOINC_OBJS
@@ -140,6 +161,12 @@ app64.o: app.c app.h
 
 appcu64.o: appcu.cu appcu.h
 	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $<
+
+tpapp64.o: app.c app.h
+	$(CC64) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+
+tpappcu64.o: appcu.cu appcu.h
+	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $< -DSEARCH_TWIN
 
 
 # BOINC64_OBJS
