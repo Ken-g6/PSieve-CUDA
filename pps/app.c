@@ -103,6 +103,8 @@ static uint64_t* gpu_started;
 static unsigned char** factor_found;
 static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
+static uint64_t r0arr[9];
+static int bbitsarr[9];
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -308,6 +310,7 @@ static FILE* scan_input_file(const char *fn)
         n1 = n;
     }
   }
+  n1++;
 
   if (ferror(file))
   {
@@ -419,10 +422,10 @@ static void read_abcd_file(const char *fn, FILE *file)
     }
   }
 #ifdef SEARCH_TWIN
-  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
              &m,&n,&k) != 3 || m != n)
 #else
-  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
+  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
         &k,&n) != 2)
 #endif
   {
@@ -431,7 +434,7 @@ static void read_abcd_file(const char *fn, FILE *file)
   }
 
   count = 0;
-  while(getc(file) != '\n');
+  //while(getc(file) != '\n');
   printf("Reading ABCD file.\n");
   while (1)
   {
@@ -447,13 +450,15 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_INVALID_PARAM);
     }*/
     if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
+    //printf("Read %lu*2^%d+/-1\n", k, n);
     count++;
-    while(getc(file) != '\n');
     while(1)
     {
       char c = getc(file);
+      while(c == 10) c = getc(file);
       if(!isdigit(c)) {
         ungetc(c, file);
+        //printf("Read char %d, which is not a digit.\n", c);
         break;
       }
       d = c-'0';
@@ -469,6 +474,7 @@ static void read_abcd_file(const char *fn, FILE *file)
 #else
       n += d;
       if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
+      //printf("Read %lu*2^%d+/-1\n", k, n);
 #endif
       count++;
       while(c != '\n') c=getc(file);
@@ -483,10 +489,10 @@ static void read_abcd_file(const char *fn, FILE *file)
     fflush(stdout);
 
 #ifdef SEARCH_TWIN
-    if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+    if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
                &m,&n,&k) != 3 || m != n)
 #else
-    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
+    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
           &k,&n) != 2)
 #endif
       break;
@@ -511,11 +517,7 @@ static void read_abcd_file(const char *fn, FILE *file)
 */
 void app_banner(void)
 {
-#ifdef SEARCH_TWIN
-  printf("tpsieve version " APP_VERSION " (testing)\n");
-#else
-  printf("ppsieve version " APP_VERSION " (testing)\n");
-#endif
+  printf(APP_NAME " version " APP_VERSION " (testing)\n");
 #ifdef __GNUC__
   printf("Compiled " __DATE__ " with GCC " __VERSION__ "\n");
 #endif
@@ -747,7 +749,7 @@ void app_init(void)
 #endif
 #endif
 
-  printf("ppsieve initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n <= %u\n",
+  printf(APP_NAME " initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n <= %u\n",
          kmin,kmax,nmin,nmax);
   fflush(stdout);
 }
@@ -763,6 +765,17 @@ unsigned int app_thread_init(int th)
     cthread_count = cuda_app_init(device_opt, user_cthread_count);
   } else {
     cthread_count = cuda_app_init(th, user_cthread_count);
+  }
+  // Create r0arr (which gives starting values for the REDC code.)
+  //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);
+  for(i=0; i < 8; i++) {
+    int l_bbits;
+    unsigned int n = get_n_subsection_start(i+1);
+    l_bbits = lg2(n);
+
+    bbitsarr[i] = l_bbits - 6;
+    r0arr[i] = ((uint64_t)1) << (64-(n >> (l_bbits-5)));
+    //printf("r0arr[%d] = %lu\n", n, r0arr[i]);
   }
 
   // Allocate the factor_found arrays.
@@ -922,19 +935,14 @@ static uint64_t shiftmod_REDC (const uint64_t a,
 
 // Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
 /* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
-static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
-  uint64_t r;
-  int bbits = ld_bbits;
-
-  r = ld_r0;
-
+static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const unsigned int l_nmin, uint64_t r, int bbits) {
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
     //if(N == 42070000070587) printf("r = %lu (CPU)\n", r);
     // Just keep squaring r.
     r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
-    if(nmin & (1u << bbits)) {
+    if(l_nmin & (1u << bbits)) {
       r += (r&1)?N:0;
       r >>= 1;
     }
@@ -950,8 +958,8 @@ static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
   return r;
 }
 
-void test_one_p(const uint64_t my_P) {
-  unsigned int n = nmin; // = nmin;
+void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
+  unsigned int n = l_nmin; // = nmin;
   unsigned int i;
   uint64_t k0, kPs;
   uint64_t kpos;
@@ -960,18 +968,21 @@ void test_one_p(const uint64_t my_P) {
 #endif
   uint64_t Ps;
   int cands_found = 0;
+
+  //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
   
   // Better get this done before the first mulmod.
   Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
   
   // Calculate k0, in Montgomery form.
-  k0 = invpowmod_REDClr(my_P, Ps);
+  k0 = invpowmod_REDClr(my_P, Ps, l_nmin, r0, l_bbits);
+  //printf("k0[%u] = %lu\n", l_nmin, k0);
 
   //if(my_P == 42070000070587) printf("%lu^-1 = %lu (CPU)\n", my_P, Ps);
   /*
   // Verify the first result.
   kpos = 1;
-  for(i=0; i < nmin; i++) {
+  for(i=0; i < l_nmin; i++) {
       kpos += (kpos&1)?my_P:0;
       kpos >>= 1;
   }
@@ -998,9 +1009,9 @@ void test_one_p(const uint64_t my_P) {
     i = __builtin_ctzll(kpos);
     kpos >>= i;
 
-    if (kpos <= kmax && kpos >= kmin) {
+    if (kpos <= kmax && kpos >= kmin && i < nstep) {
       cands_found++;
-      if (i < nstep)
+      //if (i < nstep)
 #ifdef SEARCH_TWIN
         test_factor(my_P,kpos,n+i,-1);
 #else
@@ -1022,7 +1033,7 @@ void test_one_p(const uint64_t my_P) {
     // Proceed to the K for the next N.
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += ld_nstep;
-  } while (n < nmax);
+  } while (n < l_nmax);
   if(cands_found == 0) {
     fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
 #ifdef USE_BOINC
@@ -1032,16 +1043,20 @@ void test_one_p(const uint64_t my_P) {
 }
 
 INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned int cthread_count) {
-  unsigned int i;
+  unsigned int i, j;
+  char factorlist;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
   for(i=0; i < cthread_count; i++) {
-    if(factor_found[th][i]) {
-      // Test that P.
-      test_one_p(P[i]);
+    if((factorlist=factor_found[th][i]) != 0) {
+      // Test that P, at the location(s) specified.
+      for(j=0; j < 8; j++) {
+        //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
+        if(factorlist & 1) test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        factorlist >>= 1;
+      }
     }
   }
-
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.

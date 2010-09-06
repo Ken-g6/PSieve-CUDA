@@ -42,6 +42,9 @@
 unsigned int ld_nstep;
 int ld_bbits;
 uint64_t ld_r0;
+// Stores the N to start at for the given bit position in 
+unsigned int n_subsection_start[9];
+static unsigned int *first_n_subsection = &n_subsection_start[7];
 
 // Device constants
 //__constant__ unsigned int d_bitsatatime;
@@ -75,6 +78,9 @@ static int max_ns_delay = 0;
 //globals for cuda
 cudaEvent_t stop;
 cudaStream_t stream;
+
+// A getter for n_subsection_start.  Yes, in C!
+int get_n_subsection_start(int index) { return n_subsection_start[index]; }
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -306,6 +312,40 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   cudaMemcpyToSymbol(d_nstep, &ld_nstep, sizeof(ld_nstep));
   i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
   cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
+
+  // Initialize n_subsection_start
+  // In slot 0 we insert nmax, so I'll refer to the bits as 1-8 to avoid confusion.
+  // Bit 1 is the highest part.  Usually bit 8 is the lowest, but sometimes it's a lower bit.
+  n_subsection_start[8] = nmin;
+  {
+    uint64_t test_n = nmin, next_n;
+    int j;
+    for(j=7; j >= 0; j--) {
+      // Divide the range into 8 sub-ranges of N's.
+      next_n = nmin + ((nmax - nmin + 8)/8)*(8-j);
+      // Pretty inefficient, but no more so than one kernel call set.
+      while(test_n < next_n) test_n += ld_kernel_nstep;
+      n_subsection_start[j] = test_n;
+      // If test_n wasn't changed at all, shrink the range.
+      // Horribly inefficient at O(n^2), but n == 9.
+      if(test_n == n_subsection_start[j+1]) {
+        first_n_subsection--;
+        for(i=j; i < 8; i++)
+          n_subsection_start[i] = n_subsection_start[i+1];
+      }
+    }
+  }
+  // Make sure bit 0 is the highest.
+  if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
+  n_subsection_start[0] = nmax;
+/*
+  printf("Listing N subsections created:\n");
+  for(i=0; &n_subsection_start[i] != first_n_subsection; i++)
+    printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+  printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+*/
+  cudaStreamCreate(&stream);
+  checkCUDAErr("cudaStreamCreate");
 
   return cthread_count;
 }
@@ -564,7 +604,7 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
   if(l_nmax > d_nmax) l_nmax = d_nmax;
 
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
 #endif
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
@@ -587,29 +627,30 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
 
     if ((kpos >> i) <= d_kmax) {
 #ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
-      if((kpos >> i) >= d_kmin) my_factor_found = 1;
+      if((kpos >> i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
     }
 #ifdef SEARCH_TWIN
     kpos = my_P - kpos;
 
     if (kpos <= d_kmax) {
 #ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found = 1;
+      if(kpos >= d_kmin) my_factor_found |= 1;
     }
 #endif
+    
     // Proceed to the K for the next N.
     // kPs is destroyed, just to keep the register count down.
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += d_nstep;
-  } while (n < l_nmax);
+  } while(n < l_nmax);
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
 #endif
 }
 
@@ -623,7 +664,7 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
   if(l_nmax > d_nmax) l_nmax = d_nmax;
 
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
 #endif
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
@@ -649,21 +690,21 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
     if ((((unsigned int)(kpos>>32))>>i) == 0)
       if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
 #ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+        //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
-      // Just flag this if kpos <= d_kmax.
-      if((kpos>>i) >= d_kmin) my_factor_found = 1;
-    }
+        // Just flag this if kpos <= d_kmax.
+        if((kpos>>i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
+      }
 #ifdef SEARCH_TWIN
     kpos = my_P - kpos;
     // No zeroes on the right here.
     // Small kmax means testing the low and high bits of kpos separately.
     if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
 #ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+      //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
 #endif
       // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found = 1;
+      if(kpos >= d_kmin) my_factor_found |= 1;
     }
 #endif
 
@@ -671,9 +712,9 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
     // kPs is destroyed, just to keep the register count down.
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += d_nstep;
-  } while (n < l_nmax);
+  } while(n < l_nmax);
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
 #endif
 }
 
@@ -710,11 +751,13 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
 }
 
 // Continue checking N's.
-__global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr) {
+__global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
   unsigned int n = N;
   unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   uint64_t k0 = K[i];
   unsigned char my_factor_found = factor_found_arr[i];
+
+  if(shift == 1) my_factor_found <<= 1;
 
   d_check_some_ns(P[i], Ps[i], k0, n, my_factor_found, i);
 
@@ -726,11 +769,13 @@ __global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t 
 }
 
 // Continue checking N's for small kmax.
-__global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr) {
+__global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
   unsigned int n = N;
   unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
   uint64_t k0 = K[i];
   unsigned char my_factor_found = factor_found_arr[i];
+
+  if(shift == 1) my_factor_found <<= 1;
 
   d_check_some_ns_small_kmax(P[i], Ps[i], k0, n, my_factor_found, i);
 
@@ -747,6 +792,8 @@ __global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   const unsigned int cblockcount = cthread_count/BLOCKSIZE;
   unsigned int n;
+  unsigned int shift = 0;
+  unsigned int *this_n_subsection = first_n_subsection;
   // timing variables:
 
   // Pass P.
@@ -755,9 +802,6 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  cudaStreamCreate(&stream);
-  checkCUDAErr("cudaStreamCreate");
-
   cudaEventCreate(&stop);
   checkCUDAErr("cudaEventCreate");
 
@@ -769,17 +813,28 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   // Continue checking until nmax is reached.
   if(kmax < (((uint64_t)1)<<31)
 #ifndef SEARCH_TWIN
-      // Also make sure it's worthwhile to make a full shift conditional.  This is worth it 60% of the time on Fermi (and drops a cycle 40% of the time).
+      // Also make sure it's worthwhile to make a full shift conditional.
+      // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time).
       && P[0] > (((uint64_t)1)<<45)
 #endif
     ) {
     for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-      d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+      if(n >= *this_n_subsection) {
+        if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
+        shift = 1;
+        this_n_subsection--;
+      } else shift = 0;
+      d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
       checkCUDAErr("kernel invocation");
     }
   } else {
     for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-      d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
+      if(n >= *this_n_subsection) {
+        if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
+        shift = 1;
+        this_n_subsection--;
+      } else shift = 0;
+      d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
       checkCUDAErr("kernel invocation");
     }
   }
@@ -799,6 +854,8 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
     }
   }
   checkCUDAErr("waiting for factors found");
+  cudaEventDestroy(stop);
+  checkCUDAErr("cudaEventDestroy");
 
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");

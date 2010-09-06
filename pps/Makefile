@@ -21,7 +21,7 @@ NVCC = nvcc
 
 # Flags:
 # Uncomment to use device emulation:
-#DOEMU = -deviceemu -D_DEVICEEMU -g
+DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
 CFLAGS = -fomit-frame-pointer -s $(COMMON_FLAGS)
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
@@ -46,10 +46,10 @@ BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-fil
 #nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 
 # Make-able targets:
-all: $(BINS)
+all: $(BINS) $(TPS_BINS)
 
 # Making zipfiles (requires binaries):
-zips: $(APPNAME).zip $(APPNAME)-src.zip
+zips: $(APPNAME).zip $(TPS_APPNAME).zip $(APPNAME)-src.zip
 
 $(TPS_APPNAME).zip: $(TPS_BINS) gitstatus changes
 	-rm $@ ; zip -9 $(TPS_APPNAME).zip $(TPS_APPNAME)-x86-linux $(TPS_APPNAME)-boinc-x86-linux $(TPS_APPNAME)-x86_64-linux $(TPS_APPNAME)-boinc-x86_64-linux $(TPS_APPNAME)-boinc-x86-windows.exe $(TPS_APPNAME)-x86-windows.exe $(TPS_APPNAME)-boinc-x86_64-windows.exe $(TPS_APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(TPS_APPNAME).sh $(TPS_APPNAME).bat *config.txt license.txt

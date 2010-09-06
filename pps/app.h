@@ -16,18 +16,25 @@
 #include "stdint.h"
 
 
-#define APP_VERSION "cuda-0.1.5b"
+#ifdef SEARCH_TWIN
+#define APP_PREFIX "tp"
+#else 
+#define APP_PREFIX "pp"
+#endif
+#define APP_NAME APP_PREFIX"sieve"
+#define APP_VERSION "cuda-0.1.6"
+#define APP_VERSION "cuda-0.1.6"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
 #define APP_BUFLEN 6
 
-#define CHECKPOINT_FILENAME "ppcheck%s.txt"
-#define OLD_CHECKPOINT_FILENAME "ppcheckpoint.txt"
+#define CHECKPOINT_FILENAME APP_PREFIX"check%s.txt"
+#define OLD_CHECKPOINT_FILENAME APP_PREFIX"checkpoint.txt"
 
-#define CONFIG_FILENAME "ppconfig.txt"
+#define CONFIG_FILENAME APP_PREFIX"config.txt"
 
-#define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
+#define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
 
 #define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
 #define APP_LONG_OPTS \
