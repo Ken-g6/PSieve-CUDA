@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include "stdint.h"
 
+#define APP_VERSION "cuda-0.1.6"
 
 #ifdef SEARCH_TWIN
 #define APP_PREFIX "tp"
@@ -22,8 +23,6 @@
 #define APP_PREFIX "pp"
 #endif
 #define APP_NAME APP_PREFIX"sieve"
-#define APP_VERSION "cuda-0.1.6"
-#define APP_VERSION "cuda-0.1.6"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
@@ -36,7 +35,11 @@
 
 #define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
 
+#ifdef SEARCH_TWIN
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:"
+#else
 #define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
+#endif
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \

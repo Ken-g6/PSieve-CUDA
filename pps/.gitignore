@@ -5,7 +5,7 @@ license.txt
 ppfactors.txt
 
 # Binaries:
-ppsieve-*-linux
+[tp]psieve-*-linux
 
 # BOINC files:
 boinc_finish_called

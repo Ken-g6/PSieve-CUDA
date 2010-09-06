@@ -21,7 +21,7 @@ NVCC = nvcc
 
 # Flags:
 # Uncomment to use device emulation:
-DOEMU = -deviceemu -D_DEVICEEMU -g
+#DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
 CFLAGS = -fomit-frame-pointer -s $(COMMON_FLAGS)
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)

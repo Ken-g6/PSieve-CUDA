@@ -586,9 +586,11 @@ int app_parse_option(int opt, char *arg, const char *source)
       status = parse_uint((unsigned int *)(&device_opt),arg,0,INT32_MAX);
       break;
 
+#ifndef SEARCH_TWIN
     case 'R':
       search_proth = -1;
       break;
+#endif
     //case 'q':
       //print_factors = 0;
       //break;
@@ -608,7 +610,9 @@ void app_help(void)
   printf("-m --mthreads=M    Force M threads or blocks/multiprocessor.\n");
   printf("-n --nmin=N0\n");
   printf("-N --nmax=N1       Sieve for primes k*2^n+/-1 with N0 <= n <= N1\n");
+#ifndef SEARCH_TWIN
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
+#endif
   printf("-d --device=N      Use GPU N instead of 0-threads\n");
 }
 
