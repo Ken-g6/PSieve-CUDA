@@ -10,9 +10,9 @@
  */
 
 #include <stdio.h>
-#include <stdint.h>
+#include "stdint.h"
 #include <string.h>
-#include <inttypes.h>
+#include "inttypes.h"
 #include <utility>
 #define __NO_STD_VECTOR
 #include <CL/cl.hpp>
@@ -21,7 +21,7 @@
 #include "app.h"
 #include "appcl.h"
 
-#include <unistd.h>
+#include "unistd.h"
 using namespace std;
 
 

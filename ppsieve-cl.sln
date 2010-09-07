@@ -1,0 +1,29 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual C++ Express 2008
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ppsieve-cuda", "pps\ppsieve-cuda.vcproj", "{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		BOINC-Debug|Win32 = BOINC-Debug|Win32
+		BOINC-Release|Win32 = BOINC-Release|Win32
+		Debug|Win32 = Debug|Win32
+		Release|Win32 = Release|Win32
+		TPS-Release|Win32 = TPS-Release|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.BOINC-Debug|Win32.ActiveCfg = BOINC-Debug|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.BOINC-Debug|Win32.Build.0 = BOINC-Debug|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.BOINC-Release|Win32.ActiveCfg = BOINC-Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.BOINC-Release|Win32.Build.0 = BOINC-Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Debug|Win32.ActiveCfg = Debug|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Debug|Win32.Build.0 = Debug|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Release|Win32.ActiveCfg = Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Release|Win32.Build.0 = Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-Release|Win32.ActiveCfg = TPS-Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-Release|Win32.Build.0 = TPS-Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
