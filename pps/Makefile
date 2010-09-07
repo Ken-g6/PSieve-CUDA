@@ -36,7 +36,7 @@ CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
 # Uncomment to use device emulation:
 #DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
-CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS)
+CFLAGS = -Wall -fomit-frame-pointer -g $(COMMON_FLAGS)
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 CL_LINK = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86
@@ -63,6 +63,8 @@ BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-fil
 # Make-able targets:
 all: $(BINS)
 
+cl: appcl.h $(CL_BINS)
+
 # Making zipfiles (requires binaries):
 zips: $(APPNAME).zip $(APPNAME)-src.zip
 
@@ -84,7 +86,7 @@ non-boinc: $(NON_BOINC_BINS)
 boinc: $(BOINC_BINS)
 
 clean:
-	-rm *.o ../*.o $(BINS) $(CL_BINS) $(APPNAME).zip $(APPNAME)-src.zip
+	-rm *.o ../*.o appcl.h $(BINS) $(CL_BINS) $(APPNAME).zip $(APPNAME)-src.zip
 
 $(APPNAME)-x86-linux: $(CUDA_OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)

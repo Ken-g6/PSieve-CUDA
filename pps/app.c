@@ -681,7 +681,7 @@ void app_init(void)
 #endif
 #endif
 
-  printf("ppsieve initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n <= %u\n",
+  printf("ppsieve initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n < %u\n",
          kmin,kmax,nmin,nmax);
   fflush(stdout);
 }
