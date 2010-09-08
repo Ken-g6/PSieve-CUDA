@@ -97,7 +97,11 @@ int *check_ns_delay;
 //static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
+#ifdef USE_OPENCL
+static unsigned int** factor_found;
+#else
 static unsigned char** factor_found;
+#endif
 static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
 
@@ -667,7 +671,11 @@ void app_init(void)
   check_ns_delay = xmalloc(num_threads*sizeof(int));
   for(i=0; i < (unsigned int)num_threads; i++) check_ns_delay[i] = 0;
 
+#ifdef USE_OPENCL
+  factor_found = xmalloc(num_threads*sizeof(unsigned int*));
+#else
   factor_found = xmalloc(num_threads*sizeof(unsigned char*));
+#endif
   gpu_started = xmalloc(num_threads*sizeof(uint64_t));
   for(i=0; i < (unsigned int)num_threads; i++) {
     gpu_started[i] = (uint64_t)0;
@@ -701,7 +709,11 @@ unsigned int app_thread_init(int th)
 
   // Allocate the factor_found arrays.
   if(cthread_count > 0) {
+#ifdef USE_OPENCL
+    factor_found[th] = xmalloc(cthread_count*sizeof(unsigned int));
+#else
     factor_found[th] = xmalloc(cthread_count*sizeof(unsigned char));
+#endif
     for(i=0; i < cthread_count; i++) {
       factor_found[th][i] = 0;
     }

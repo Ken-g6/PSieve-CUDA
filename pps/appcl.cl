@@ -174,14 +174,13 @@ invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r) {
 // *** KERNELS ***
 
 // Start checking N's.
-__kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uchar * factor_found_arr,
+__kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
                                  // Device constants
                                  const ulong d_r0			// 4
                                  ) {
   uint n = D_NMIN; // = nmin;
   uint i;
   ulong k0;
-  //uchar my_factor_found = 0;
   ulong my_P, my_Ps;
   i = get_global_id(0);
   my_P = P[i];
@@ -208,7 +207,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 }
 
 // Continue checking N's.
-__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uchar * factor_found_arr, const uint N
+__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N
                                  // Device constants
 #ifndef D_KMIN
                                  , const ulong d_kmin		// 5
@@ -222,7 +221,7 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   const ulong Ps = Psarr[i];
   uint n = N;
   ulong k0 = K[i];
-  uchar my_factor_found = factor_found_arr[i];
+  uint my_factor_found = factor_found_arr[i];
   ulong kpos, kPs;
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
@@ -245,23 +244,26 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
       i=63 - clz (i & -i);
     }
 
-    kpos >>= i;
 #ifdef D_KMAX
-    if (((uint)(kpos >> 32)) == 0 && ((uint)kpos) <= D_KMAX) {
+    if ((((uint)(kpos >> 32))>>i) == 0) {
+     if(((uint)(kpos >> i)) <= D_KMAX) {
 #else
-    if (kpos <= d_kmax) {
+    if ((kpos >> i) <= d_kmax) {
 #endif
 //#ifdef _DEVICEEMU
       //printf("%lu | %lu*2^%u+1 (P[%d])\n", my_P, kpos, n+i, get_global_id(0));
 //#endif
       // Just flag this if kpos <= d_kmax.
 #ifdef D_KMIN
-      if(kpos >= D_KMIN)
+      if((kpos >> i) >= D_KMIN)
 #else
-      if(kpos >= d_kmin)
+      if((kpos >> i) >= d_kmin)
 #endif
         my_factor_found = 1;
     }
+#ifdef D_KMAX
+    }
+#endif
 
     // Proceed to the K for the next N.
     // kPs is destroyed, just to keep the register count down.

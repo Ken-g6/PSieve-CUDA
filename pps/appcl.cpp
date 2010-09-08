@@ -576,7 +576,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   CL_SET_BUF_ARG(start_ns_kernel, d_K);
   CL_SET_BUF_ARG(check_more_ns_kernel, d_K);
 
-  d_factor_found = clCreateBuffer(context, CL_MEM_READ_WRITE, cthread_count*sizeof(cl_uchar), NULL, &status);
+  d_factor_found = clCreateBuffer(context, CL_MEM_READ_WRITE, cthread_count*sizeof(cl_uint), NULL, &status);
   if (status != CL_SUCCESS) {
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
     checkCUDAErr(status, "Creating buffer d_factor_found");
@@ -656,18 +656,19 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   }
 }
 
-void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
+void get_factors_found(unsigned int *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
   cl_event dev_read_event;
   /* Wait for the computation to finish execution */
   checkCUDAErr(clWaitForEvents(1, &comp_done_event), "Waiting for computation to finish. (clWaitForEvents)");
   checkCUDAErr(clReleaseEvent(comp_done_event), "Release event object 2. (clReleaseEvent)");
 
+  //  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned int), cudaMemcpyDeviceToHost);
   // Get d_factor_found, into the thread'th factor_found array.
   checkCUDAErr(clEnqueueReadBuffer(commandQueue,
         d_factor_found,
         CL_TRUE,
         0,
-        cthread_count*sizeof(cl_uchar),
+        cthread_count*sizeof(cl_uint),
         factor_found,
         0,
         NULL,
@@ -676,7 +677,6 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
   checkCUDAErr(clWaitForEvents(1, &dev_read_event), "Waiting for results read. (clWaitForEvents)");
   checkCUDAErr(clReleaseEvent(dev_read_event), "Release event object 3. (clReleaseEvent)");
 
-  //  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
 #ifndef NDEBUG
   printf("Retrieve successful...\n");
 #endif
