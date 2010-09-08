@@ -384,23 +384,11 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       &compute_units,
       NULL);
 
-  if(compute_units < 16) {
-#ifdef USE_BOINC
-    fprintf(stderr, "Device %d looks like an %d-core CPU, not a GPU.  Exiting!\n", deviceno, compute_units);
-    bexit(ERR_INVALID_PARAM);
-#else
-    fprintf(stderr, "Device %d looks like an %d-core CPU, not a GPU.  Adjusting.\n", deviceno, compute_units);
-#endif
-  }
   fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
-      bmprefix(), compute_units, compute_units*5, deviceno);
+      bmprefix(), compute_units*16, compute_units*16*5, deviceno);
   // 7 wavefronts per SIMD
   // Double this if using ulong2.
-  if(compute_units < 16) {
-    *cthread_count = compute_units;
-  } else {
-    *cthread_count = compute_units * (7 * BLOCKSIZE);
-  }
+  *cthread_count = compute_units * (7 * BLOCKSIZE);
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
