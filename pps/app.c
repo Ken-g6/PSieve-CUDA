@@ -753,7 +753,7 @@ void app_init(void)
 #endif
 #endif
 
-  printf(APP_NAME " initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n <= %u\n",
+  printf(APP_NAME " initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n < %u\n",
          kmin,kmax,nmin,nmax);
   fflush(stdout);
 }
