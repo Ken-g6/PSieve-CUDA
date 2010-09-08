@@ -563,7 +563,7 @@ int app_parse_option(int opt, char *arg, const char *source)
       break;
 
     case 'm':
-      status = parse_uint(&user_cthread_count,arg,1,(1U<<14));
+      status = parse_uint(&user_cthread_count,arg,1,(1U<<31));
       break;
       
     case 'n':
