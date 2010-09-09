@@ -526,10 +526,12 @@ int app_parse_option(int opt, char *arg, const char *source)
       search_proth = -1;
       break;
 
+#ifdef VECSIZE
     case 'v':
       status = parse_uint(&vecsize,arg,2,4);
       if(vecsize < 2 || vecsize > 4) vecsize = VECSIZE;
       break;
+#endif
     //case 'q':
       //print_factors = 0;
       //break;
@@ -550,7 +552,9 @@ void app_help(void)
   printf("-n --nmin=N0\n");
   printf("-N --nmax=N1       Sieve for primes k*2^n+/-1 with N0 <= n <= N1\n");
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
+#ifdef VECSIZE
   printf("-v --vecsize=N     Use the given vector size (2 or 4).\n");
+#endif
   printf("-d --device=N      Use GPU N instead of 0-threads\n");
 }
 

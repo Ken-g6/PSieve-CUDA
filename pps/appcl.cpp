@@ -332,21 +332,26 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   /////////////////////////////////////////////////////////////////
   // Create an OpenCL context
   /////////////////////////////////////////////////////////////////
-  context = clCreateContextFromType(cps, CL_DEVICE_TYPE_ALL, NULL, NULL, &status);
+#ifdef _DEVICEEMU
+  context = clCreateContextFromType(cps, CL_DEVICE_TYPE_CPU, NULL, NULL, &status);
+#else
+  // By default, on a GPU only.
+  context = clCreateContextFromType(cps, CL_DEVICE_TYPE_GPU, NULL, NULL, &status);
+#endif
   if (status != CL_SUCCESS) { 
-    fprintf(stderr, "Error: Creating Context. (clCreateContextFromType)\n");
+    fprintf(stderr, "Error: Creating Context. (clCreateContextFromType): %s\n", printable_cl_error(status));
     return 1;
   }
 
   /* First, get the size of device list data */
   status = clGetContextInfo(context, CL_CONTEXT_DEVICES, 0, NULL, &deviceListSize);
   if (status != CL_SUCCESS) { 
-    fprintf(stderr, "Error: Getting Context Info (device list size, clGetContextInfo)\n");
+    fprintf(stderr, "Error: Getting Context Info (device list size, clGetContextInfo): %s\n", printable_cl_error(status));
     return 1;
   }
   if(deviceListSize <= (size_t)deviceno) {
     fprintf(stderr, "Error: Device %d not found.\n", deviceno);
-    return 1;
+    bexit(ERR_INVALID_PARAM);
   }
 
   /////////////////////////////////////////////////////////////////
@@ -361,7 +366,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   /* Now, get the device list data */
   status = clGetContextInfo(context, CL_CONTEXT_DEVICES, deviceListSize, devices, NULL);
   if (status != CL_SUCCESS) {
-    fprintf(stderr, "Error: Getting Context Info (device list, clGetContextInfo)\n");
+    fprintf(stderr, "Error: Getting Context Info (device list, clGetContextInfo): %s\n", printable_cl_error(status));
     return 1;
   }
 
@@ -370,7 +375,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   /////////////////////////////////////////////////////////////////
   commandQueue = clCreateCommandQueue(context, devices[deviceno], 0, &status);
   if(status != CL_SUCCESS) {
-    fprintf(stderr, "Creating Command Queue. (clCreateCommandQueue)\n");
+    fprintf(stderr, "Creating Command Queue. (clCreateCommandQueue): %s\n", printable_cl_error(status));
     return 1;
   }
 
@@ -387,9 +392,10 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
 
   fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
       bmprefix(), compute_units*16, compute_units*16*5, deviceno);
-  // 7 wavefronts per SIMD
+  // 7 wavefronts per SIMD by default.
   // Double this if using ulong2.
-  *cthread_count = compute_units * (7 * BLOCKSIZE);
+  if(*cthread_count == 0) *cthread_count = 7;
+  *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
   *cthread_count *= vecsize;
 
   // N's to search each time a kernel is run:
@@ -469,7 +475,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   size_t sourceSize[]    = { strlen(source_chars) };
   program = clCreateProgramWithSource(context, 1, &source_chars, sourceSize, &status);
   if (status != CL_SUCCESS) {
-    fprintf(stderr, "Error: Loading Binary into cl_program (clCreateProgramWithBinary)\n");
+    fprintf(stderr, "Error: Loading Binary into cl_program (clCreateProgramWithBinary): %s\n", printable_cl_error(status));
     return 1;
   }
 
@@ -485,20 +491,20 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   /* create a cl program executable for all the devices specified */
   status = clBuildProgram(program, 1, &devices[deviceno], /*"-g"*/NULL , NULL, NULL);
   if (status != CL_SUCCESS)  {
-    fprintf(stderr, "Error: Building Program (clBuildProgram)\n");
+    fprintf(stderr, "Error: Building Program (clBuildProgram): %s\n", printable_cl_error(status));
     return 1;
   }
 
   /* get a kernel object handle for a kernel with the given name */
   start_ns_kernel = clCreateKernel(program, "start_ns", &status);
   if (status != CL_SUCCESS) { 
-    fprintf(stderr, "Error: clCreateKernel (start_ns)\n");
+    fprintf(stderr, "Error: clCreateKernel (start_ns): %s\n", printable_cl_error(status));
     return 1;
   }
 
   check_more_ns_kernel = clCreateKernel(program, "check_more_ns", &status);
   if (status != CL_SUCCESS) {
-    fprintf(stderr, "Error: clCreateKernel (check_more_ns)\n");
+    fprintf(stderr, "Error: clCreateKernel (check_more_ns): %s\n", printable_cl_error(status));
     return 1;
   }
 
