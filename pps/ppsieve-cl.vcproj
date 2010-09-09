@@ -131,7 +131,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_OPENCL"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -150,7 +150,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="OpenCL.lib"
-				OutputFile="$(OutDir)\ppsieve-cl-x86-windows.exe"
+				OutputFile="$(OutDir)\$(ProjectName)-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
 				GenerateDebugInformation="true"
@@ -372,7 +372,7 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS;USE_OPENCL"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -390,7 +390,8 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
+				AdditionalOptions="/nodefaultlib:&quot;msvcprt.lib&quot;"
+				AdditionalDependencies="OpenCL.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
 				OutputFile="$(OutDir)\$(ProjectName)-boinc-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
