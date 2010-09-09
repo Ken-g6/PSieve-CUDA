@@ -44,6 +44,7 @@ using namespace std;
 unsigned int ld_nstep;
 int ld_bbits;
 uint64_t ld_r0;
+unsigned int vecsize = VECSIZE;
 
 // Device constants
 //__constant__ unsigned int d_bitsatatime;
@@ -389,9 +390,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // 7 wavefronts per SIMD
   // Double this if using ulong2.
   *cthread_count = compute_units * (7 * BLOCKSIZE);
-#ifdef VECSIZE
-  *cthread_count *= VECSIZE;
-#endif
+  *cthread_count *= vecsize;
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
@@ -443,9 +442,8 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   sprintf(defbuf, "#define D_NMAX (%uu)\n", nmax);
   source += defbuf;
   // Vectorization (pass-thru):
-#ifdef VECSIZE
-  sprintf(defbuf, "#define VECSIZE %u\n", VECSIZE);
-#endif
+  sprintf(defbuf, "#define VECSIZE %u\n", vecsize);
+  source += defbuf;
   
   if(kmin < ((uint64_t)(1u<<31))) {
     //CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
@@ -473,6 +471,13 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   if (status != CL_SUCCESS) {
     fprintf(stderr, "Error: Loading Binary into cl_program (clCreateProgramWithBinary)\n");
     return 1;
+  }
+
+  {
+    FILE *out;
+    out = fopen("appclout.cl", "w");
+    fprintf(out, "%s", source_chars);
+    fclose(out);
   }
 
   /* create a cl program executable for all the devices specified */
@@ -581,12 +586,9 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   CL_SET_BUF_ARG(check_more_ns_kernel, d_factor_found);
 
   // Set the number of actual GPU threads to run.
-#ifdef VECSIZE
   // If vectorized, divide by the vector size.
-  global_cthread_count[0] = cthread_count / VECSIZE;
-#else
-  global_cthread_count[0] = cthread_count;
-#endif
+  global_cthread_count[0] = cthread_count / vecsize;
+  //global_cthread_count[0] = cthread_count;
 
   return cthread_count;
 }

@@ -18,7 +18,7 @@
 #ifndef USE_OPENCL
 #define APP_VERSION "cuda-0.1.5a"
 #else
-#define APP_VERSION "cl-0.0.1-alpha"
+#define APP_VERSION "cl-0.0.2-alpha"
 #endif
 
 /* Number of primes to buffer between calls to app_thread_fun()
@@ -32,7 +32,7 @@
 
 #define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:Rv:"
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
@@ -43,6 +43,7 @@
   {"device",        required_argument, 0, 'd'}, \
   {"bitsatatime",   required_argument, 0, 'b'}, \
   {"mthreads",      required_argument, 0, 'm'}, \
+  {"vecsize",       required_argument, 0, 'v'}, \
   {"riesel",        no_argument,       0, 'R'},
 
 #ifdef USE_BOINC

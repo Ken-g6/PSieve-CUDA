@@ -53,6 +53,11 @@ while(<>) {
 	s/"/\\"/g;
 
 	# Print the line in a string.  Adjacent strings are concatenated.
-	print '"', $_, "\\n\" \\\n";
+	if(s/\\$//) {
+		# If string ended in an escaped newline, just print the string without a newline.
+		print '"', $_, "\" \\\n";
+	} else {
+		print '"', $_, "\\n\" \\\n";
+	}
 }
 print ";\n#endif\n#endif\n";

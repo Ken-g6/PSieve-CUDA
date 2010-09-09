@@ -31,6 +31,8 @@
 #define VINT VECSIZEIT(uint, VECSIZE)
 #if VECSIZE == 2
 #define VECTORIZE(x) ((x),(x))
+#elif VECSIZE == 3
+#define VECTORIZE(x) ((x),(x),(x))
 #elif VECSIZE == 4
 #define VECTORIZE(x) ((x),(x),(x),(x))
 #endif
@@ -179,7 +181,7 @@ invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
     r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
     if(D_NMIN & (1u << bbits)) {
-      r += ((V2VINT(r)&((VINT)VECTORIZE(1))) == (VINT)VECTORIZE(1))?N:((VLONG)VECTORIZE(0));
+      r += ((r&((VLONG)VECTORIZE(1))) == (VLONG)VECTORIZE(1))?N:((VLONG)VECTORIZE(0));
       r = r >> 1u;
     }
   }
