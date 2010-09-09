@@ -10,41 +10,64 @@
  */
 
 //#define KERNEL_ONLY
-//#include "appcl.h"
 //#pragma OPENCL EXTENSION cl_amd_printf : enable
-#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+//#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+/*
+#define D_MONT_NSTEP 35u
+#define D_NSTEP 29u
+#define D_NMIN 100u
+#define D_NMAX 2000000u
+#define D_BBITS 1u
+#define D_KERNEL_NSTEP 4096u
+#define D_KMIN 1200u
+#define D_KMAX 9999u
+#define VECSIZE 2
+*/
+
+#define VECSIZEIT2(x,y) x##y
+#define VECSIZEIT(x,y) VECSIZEIT2(x,y)
+#define VLONG VECSIZEIT(ulong, VECSIZE)
+#define VSIGNED_LONG VECSIZEIT(long, VECSIZE)
+#define VINT VECSIZEIT(uint, VECSIZE)
+#if VECSIZE == 2
+#define VECTORIZE(x) ((x),(x))
+#elif VECSIZE == 4
+#define VECTORIZE(x) ((x),(x),(x),(x))
+#endif
+#define V2VINT(x) VECSIZEIT(convert_uint, VECSIZE)(x)
+#define V2VLONG(x) VECSIZEIT(convert_ulong, VECSIZE)(x)
 
 
 /*** Kernel Helpers ***/
 // Special thanks to Alex Kruppa for introducing me to Montgomery REDC math!
 /* Compute a^{-1} (mod 2^(32 or 64)), according to machine's word size */
 
-ulong
-invmod2pow_ul (const ulong n)
+VLONG
+invmod2pow_ul (const VLONG n)
 {
-  ulong r;
-  //uint ir;
-  const uint in = (uint)n;
+  VLONG r;
+  //VINT ir;
+  const VINT in = V2VINT(n);
 
   //ASSERT (n % 2UL != 0UL);
 
   // Suggestion from PLM: initing the inverse to (3*n) XOR 2 gives the
   // correct inverse modulo 32, then 3 (for 32 bit) or 4 (for 64 bit) 
   // Newton iterations are enough.
-  r = (n+n+n) ^ ((ulong)2);
+  r = (n+n+n) ^ ((VLONG)2);
   // Newton iteration
-  r += r - (uint) r * (uint) r * in;
-  r += r - (uint) r * (uint) r * in;
-  r += r - (uint) r * (uint) r * in;
+  r += r - V2VLONG(V2VINT(r) * V2VINT(r) * in);
+  r += r - V2VLONG(V2VINT(r) * V2VINT(r) * in);
+  r += r - V2VLONG(V2VINT(r) * V2VINT(r) * in);
   r += r - r * r * n;
 
   return r;
 }
 
-ulong mulmod_REDC (const ulong a, const ulong b, 
-    const ulong N, const ulong Ns)
+VLONG mulmod_REDC (const VLONG a, const VLONG b, 
+    const VLONG N, const VLONG Ns)
 {
-  ulong rax, rcx;
+  VLONG rax, rcx;
 
   // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
@@ -53,7 +76,7 @@ ulong mulmod_REDC (const ulong a, const ulong b,
   rcx = mul_hi(a,b);	// rcx = Th
   
   rax *= Ns;		// rax = (T*Ns) mod 2^64 = m
-  rcx += (rax!=0)?1:0;	// if rax != 0, increase rcx
+  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0));	// if rax != 0, increase rcx
   rax = mad_hi(rax, N, rcx);
   // compute (rdx + rcx) mod N
   //rax += rcx;
@@ -75,14 +98,14 @@ ulong mulmod_REDC (const ulong a, const ulong b,
 
 // mulmod_REDC(1, 1, N, Ns)
 // But note that mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-ulong onemod_REDC(const ulong N, ulong rax) {
-  ulong rcx;
+VLONG onemod_REDC(const VLONG N, VLONG rax) {
+  VLONG rcx;
 
   // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
   //rcx = 0;
   //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx = (rax!=0)?1:0;
+  rcx = (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0));	// if rax != 0, increase rcx
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
   rax = mad_hi(rax, N, rcx);
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
@@ -93,12 +116,12 @@ ulong onemod_REDC(const ulong N, ulong rax) {
 }
 
 // Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-ulong mod_REDC(const ulong a, const ulong N, const ulong Ns) {
+VLONG mod_REDC(const VLONG a, const VLONG N, const VLONG Ns) {
 //#ifndef DEBUG64
   return onemod_REDC(N, Ns*a);
   /*
 //#else
-  const ulong r = onemod_REDC(N, Ns*a);
+  const VLONG r = onemod_REDC(N, Ns*a);
 
   if (longmod (r, 0, N) != mulmod(a, 1, N)) {
     fprintf (stderr, "%sError, redc(%lu,%lu) = %lu\n", bmprefix(), a, N, r);
@@ -113,20 +136,20 @@ ulong mod_REDC(const ulong a, const ulong N, const ulong Ns) {
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
 // rax's original value is destroyed, just to keep the register count down.
-ulong shiftmod_REDC (const ulong a, 
-    const ulong N, ulong rax)
+VLONG shiftmod_REDC (const VLONG a, 
+    const VLONG N, VLONG rax)
 {
-  ulong rcx;
+  VLONG rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= D_MONT_NSTEP; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rax = rax << D_MONT_NSTEP; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
   rcx = a >> D_NSTEP;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
   //rax *= Ns;
   //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx += (rax!=0)?1:0;
+  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0));	// if rax != 0, increase rcx
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
   rax = mad_hi(rax, N, rcx);
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
@@ -135,7 +158,7 @@ ulong shiftmod_REDC (const ulong a,
 
   /*
 #ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, ((ulong)1)<<D_MONT_NSTEP, N))
+  if (longmod (rax, 0, N) != mulmod(a, ((VLONG)1)<<D_MONT_NSTEP, N))
   {
     fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, D_MONT_NSTEP, N, rax);
     bexit(1);
@@ -147,16 +170,17 @@ ulong shiftmod_REDC (const ulong a,
 }
 
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
-ulong
-invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r) {
+VLONG
+invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
+  VLONG r = r0;
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
     // Just keep squaring r.
     r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
     if(D_NMIN & (1u << bbits)) {
-      r += (r&1)?N:0;
-      r >>= 1;
+      r += ((V2VINT(r)&((VINT)VECTORIZE(1))) == (VINT)VECTORIZE(1))?N:((VLONG)VECTORIZE(0));
+      r = r >> 1u;
     }
   }
 
@@ -172,7 +196,8 @@ invpowmod_REDClr (const ulong N, const ulong Ns, int bbits, ulong r) {
 
 
 // *** KERNELS ***
-
+#define VLOAD VECSIZEIT(vload,VECSIZE)
+#define VSTORE VECSIZEIT(vstore,VECSIZE)
 // Start checking N's.
 __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
                                  // Device constants
@@ -180,10 +205,10 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
                                  ) {
   uint n = D_NMIN; // = nmin;
   uint i;
-  ulong k0;
-  ulong my_P, my_Ps;
+  VLONG k0;
+  VLONG my_P, my_Ps;
   i = get_global_id(0);
-  my_P = P[i];
+  my_P = VLOAD(i, P); //P[i];
 
   // Better get this done before the first mulmod.
   my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
@@ -201,12 +226,45 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
   //d_check_some_ns(my_P, my_Ps, k0, n, my_factor_found, i);
 
   //i = get_global_id(0);
-  factor_found_arr[i] = 0;
-  Ps[i] = my_Ps;
-  K[i] = k0;
+  //factor_found_arr[i] = 0;
+  VSTORE(0, i, factor_found_arr);
+  //Ps[i] = my_Ps;
+  VSTORE(my_Ps, i, Ps);
+  //K[i] = k0;
+  VSTORE(k0, i, K);
 }
 
 // Continue checking N's.
+//i=(__float_as_int(__VINT2float_rz(i & -i))>>23)-0x7f;
+#define VEC_CTZLL(I,X) \
+        if(I.X != 0) { \
+          I.X=31u - clz (I.X & -I.X); \
+      } else { \
+        I.X = (uint)(kpos.X>>32); \
+        I.X=63 - clz (I.X & -I.X); \
+      }
+    // Just flag this if kpos <= d_kmax.
+#ifdef D_KMAX
+#define VEC_FLAG_TEST(X) \
+    if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
+     if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
+      if((kpos.X >> v.X) >= D_KMIN) \
+        my_factor_found.X = 1; \
+     } \
+    }
+#else
+#ifdef D_KMIN
+#define THE_KMIN D_KMIN
+#else
+#define THE_KMIN d_kmin
+#endif
+#define VEC_FLAG_TEST(X) \
+    if ((kpos.X >> v.X) <= d_kmax) { \
+      if((kpos.X >> v.X) >= THE_KMIN) \
+        my_factor_found.X = 1; \
+    }
+#endif
+
 __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N
                                  // Device constants
 #ifndef D_KMIN
@@ -216,18 +274,24 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
                                  , const ulong d_kmax		// 6
 #endif
                                  ) {
-  uint i = get_global_id(0);
-  const ulong my_P = P[i];
-  const ulong Ps = Psarr[i];
+  VINT v;
+  VLONG my_P;// = P[v.x];
+  VLONG Ps;// = Psarr[v.x];
   uint n = N;
-  ulong k0 = K[i];
-  uint my_factor_found = factor_found_arr[i];
-  ulong kpos, kPs;
+  VLONG k0;// = K[v.x];
+  VINT my_factor_found;// = factor_found_arr[v.x];
+  VLONG kpos, kPs;
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
+  v.x = get_global_id(0);
+  Ps = VLOAD(v.x, Psarr);
+  k0 = VLOAD(v.x, K);
+  my_P = VLOAD(v.x, P);
+  my_factor_found = VLOAD(v.x, factor_found_arr);
+  
 #ifdef _DEVICEEMU
-  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (uint)k0, D_KERNEL_NSTEP);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
@@ -235,34 +299,38 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     kPs = k0 * Ps;
     kpos = onemod_REDC(my_P, kPs);
     //i = __ffsll(kpos)-1;
-    i = (uint)kpos;
-    if(i != 0) {
-      //i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-      i=31 - clz (i & -i);
+    v = V2VINT(kpos);
+    if(v.x == 0 || v.y == 0
+#if VECSIZE >= 3
+        || v.z == 0
+#if VECSIZE >= 4
+        || v.w == 0
+#endif
+#endif
+      ) {
+      // Happens, but my calculator can't compute how rarely!
+      // About 1 in every 2^30 times.
+      VEC_CTZLL(v,x)
+      VEC_CTZLL(v,y)
+#if VECSIZE >= 3
+      VEC_CTZLL(v,z)
+#if VECSIZE >= 4
+      VEC_CTZLL(v,w)
+#endif
+#endif
     } else {
-      i = (uint)(kpos>>32);
-      i=63 - clz (i & -i);
+      // Happens most of the time.
+      v=31u - clz (v & -v);
     }
 
-#ifdef D_KMAX
-    if ((((uint)(kpos >> 32))>>i) == 0) {
-     if(((uint)(kpos >> i)) <= D_KMAX) {
-#else
-    if ((kpos >> i) <= d_kmax) {
+    // Just flag this if kpos <= d_kmax.
+    VEC_FLAG_TEST(x)
+    VEC_FLAG_TEST(y)
+#if VECSIZE >= 3
+    VEC_FLAG_TEST(z)
+#if VECSIZE >= 4
+    VEC_FLAG_TEST(w)
 #endif
-//#ifdef _DEVICEEMU
-      //printf("%lu | %lu*2^%u+1 (P[%d])\n", my_P, kpos, n+i, get_global_id(0));
-//#endif
-      // Just flag this if kpos <= d_kmax.
-#ifdef D_KMIN
-      if((kpos >> i) >= D_KMIN)
-#else
-      if((kpos >> i) >= d_kmin)
-#endif
-        my_factor_found = 1;
-    }
-#ifdef D_KMAX
-    }
 #endif
 
     // Proceed to the K for the next N.
@@ -271,11 +339,13 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     n += D_NSTEP;
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
-  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (uint)k0);
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (VINT)k0);
 #endif
-  i = get_global_id(0);
-  factor_found_arr[i] = my_factor_found;
+  v.x = get_global_id(0);
+  //factor_found_arr[v.x] = my_factor_found;
+  VSTORE(my_factor_found, v.x, factor_found_arr);
   if(n < D_NMAX) {
-    K[i] = k0;
+    //K[v.x] = k0;
+    VSTORE(k0, v.x, K);
   }
 }

@@ -15,6 +15,8 @@
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
 #define ITERATIONS_PER_KERNEL 300
 
+#define VECSIZE 2
+
 // Maximum time to sleep per K set, per N, in nanoseconds.
 // For PPSE sieve (7/2010), 3*2,000,000 N's = about 6 seconds.
 #define MAX_NS_DELAY_PER_N 3
