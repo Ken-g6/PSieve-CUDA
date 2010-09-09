@@ -473,12 +473,14 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     return 1;
   }
 
+  /*
   {
     FILE *out;
     out = fopen("appclout.cl", "w");
     fprintf(out, "%s", source_chars);
     fclose(out);
   }
+  */
 
   /* create a cl program executable for all the devices specified */
   status = clBuildProgram(program, 1, &devices[deviceno], "-g"/*NULL*/ , NULL, NULL);
