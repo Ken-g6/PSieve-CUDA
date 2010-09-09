@@ -483,7 +483,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   */
 
   /* create a cl program executable for all the devices specified */
-  status = clBuildProgram(program, 1, &devices[deviceno], "-g"/*NULL*/ , NULL, NULL);
+  status = clBuildProgram(program, 1, &devices[deviceno], /*"-g"*/NULL , NULL, NULL);
   if (status != CL_SUCCESS)  {
     fprintf(stderr, "Error: Building Program (clBuildProgram)\n");
     return 1;
