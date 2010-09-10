@@ -382,14 +382,30 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   /////////////////////////////////////////////////////////////////
   // Set up constants that can be #defined.
   /////////////////////////////////////////////////////////////////
+  // Knowing the device, we need to calculate how many threads to give it.
+  cl_uint compute_units;
+  clGetDeviceInfo(devices[deviceno],
+      CL_DEVICE_MAX_COMPUTE_UNITS,
+      sizeof(cl_uint),
+      &compute_units,
+      NULL);
 
-  if (ld_nstep > (nmax-nmin+1))
-    ld_nstep = (nmax-nmin+1);
+  fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
+      bmprefix(), compute_units*16, compute_units*16*5, deviceno);
+  // 7 wavefronts per SIMD by default.
+  // Double this if using ulong2.
+  if(*cthread_count == 0) *cthread_count = 7;
+  *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
+  *cthread_count *= vecsize;
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
+  // Adjust for differing block sizes.
+  ld_kernel_nstep *= 384;
+  ld_kernel_nstep /= (*cthread_count/compute_units);
   ld_kernel_nstep *= ld_nstep;
-  // No adjusting for block size, as it's always unknown (implementation-set).
+  if (ld_nstep > (nmax-nmin+1))
+    ld_nstep = (nmax-nmin+1);
 
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
@@ -501,100 +517,6 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
   }
 
-  // Knowing the device, we need to calculate how many threads to give it.
-  cl_uint compute_units;
-  clGetDeviceInfo(devices[deviceno],
-      CL_DEVICE_MAX_COMPUTE_UNITS,
-      sizeof(cl_uint),
-      &compute_units,
-      NULL);
-
-  fprintf(stderr, "%sDetected %d SIMDs (%d SPUs?) on device %d.\n",
-      bmprefix(), compute_units, compute_units*16*5, deviceno);
-  if(*cthread_count == 0) {
-    size_t best_cthread_count;
-
-    status = clGetKernelWorkGroupInfo(check_more_ns_kernel,
-        devices[deviceno],
-        CL_KERNEL_WORK_GROUP_SIZE,
-        sizeof(size_t),
-        &best_cthread_count,
-        NULL);
-
-    if(status != CL_SUCCESS) {
-      fprintf(stderr, "Warning: clGetKernelWorkGroupInfo (check_more_ns_kernel): %s\n", printable_cl_error(status));
-      // Default to -m 8 in case of error.
-      *cthread_count = compute_units * (8 * BLOCKSIZE);
-    } else {
-      *cthread_count = best_cthread_count;
-    }
-
-    status = clGetKernelWorkGroupInfo(start_ns_kernel,
-        devices[deviceno],
-        CL_KERNEL_WORK_GROUP_SIZE,
-        sizeof(size_t),
-        &best_cthread_count,
-        NULL);
-
-    if(status != CL_SUCCESS) {
-      fprintf(stderr, "Warning: clGetKernelWorkGroupInfo (start_ns_kernel): %s\n", printable_cl_error(status));
-    } else {
-      while(*cthread_count > best_cthread_count) {
-        if((*cthread_count) & 1) 
-          bmsg("Warning: clGetKernelWorkGroupInfo (check_more_ns_kernel) is odd!\n");
-        // Divide by two until the kernel sizes are more in sync.
-        *cthread_count >>= 1;
-      }
-    }
-    if((*cthread_count/(compute_units*BLOCKSIZE))*compute_units*BLOCKSIZE == *cthread_count)
-      printf("Using %d threads (-m %d).\n", *cthread_count, *cthread_count/compute_units/BLOCKSIZE);
-    else
-      printf("Using %d threads (about -m %2.2f).\n", *cthread_count, ((float)*cthread_count)/((float)(compute_units*BLOCKSIZE)));
-  } else {
-    size_t best_cthread_count;
-    // Manually set cthread_count from -m.
-    *cthread_count *= compute_units * BLOCKSIZE;
-
-    status = clGetKernelWorkGroupInfo(check_more_ns_kernel,
-        devices[deviceno],
-        CL_KERNEL_WORK_GROUP_SIZE,
-        sizeof(size_t),
-        &best_cthread_count,
-        NULL);
-
-    if(status != CL_SUCCESS) {
-      fprintf(stderr, "Warning: clGetKernelWorkGroupInfo (check_more_ns_kernel): %s\n", printable_cl_error(status));
-    } else {
-      // Divide by two until the kernel sizes are more in sync.
-      while(*cthread_count > best_cthread_count) {
-        *cthread_count >>= 1;
-        fprintf(stderr, "Warning: Reducing -m to %d.\n", *cthread_count/compute_units/BLOCKSIZE);
-      }
-    }
-
-    status = clGetKernelWorkGroupInfo(start_ns_kernel,
-        devices[deviceno],
-        CL_KERNEL_WORK_GROUP_SIZE,
-        sizeof(size_t),
-        &best_cthread_count,
-        NULL);
-
-    if(status != CL_SUCCESS) {
-      fprintf(stderr, "Warning: clGetKernelWorkGroupInfo (start_ns_kernel): %s\n", printable_cl_error(status));
-    } else {
-      // Divide by two until the kernel sizes are more in sync.
-      while(*cthread_count > best_cthread_count) {
-        *cthread_count >>= 1;
-        fprintf(stderr, "Warning: Reducing -m to %d.\n", *cthread_count/compute_units/BLOCKSIZE);
-      }
-    }
-  }
-  // Set the number of actual GPU threads to run.
-  global_cthread_count[0] = *cthread_count;
-
-  // Double this if using ulong2.
-  *cthread_count *= vecsize;
-
   return 0;
 }
 
@@ -670,6 +592,11 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   }
   CL_SET_BUF_ARG(start_ns_kernel, d_factor_found);
   CL_SET_BUF_ARG(check_more_ns_kernel, d_factor_found);
+
+  // Set the number of actual GPU threads to run.
+  // If vectorized, divide by the vector size.
+  global_cthread_count[0] = cthread_count / vecsize;
+  //global_cthread_count[0] = cthread_count;
 
   return cthread_count;
 }
