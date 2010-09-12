@@ -36,7 +36,7 @@ CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
 # Uncomment to use device emulation:
 #DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
-CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS)
+CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS) #-D_DEVICEEMU
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 CL_LINK = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86

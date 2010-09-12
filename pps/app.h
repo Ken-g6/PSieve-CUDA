@@ -18,7 +18,7 @@
 #ifndef USE_OPENCL
 #define APP_VERSION "cuda-0.1.5a"
 #else
-#define APP_VERSION "cl-0.1.0-beta"
+#define APP_VERSION "cl-0.1.0a-beta"
 #endif
 
 /* Number of primes to buffer between calls to app_thread_fun()

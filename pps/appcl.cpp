@@ -392,10 +392,10 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
 
   fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
       bmprefix(), compute_units*16, compute_units*16*5, deviceno);
-  // 7 wavefronts per SIMD by default.
-  // Double this if using ulong2.
-  if(*cthread_count == 0) *cthread_count = 7;
+  // Make it 8 wavefronts per SIMD by default.
+  if(*cthread_count == 0) *cthread_count = 8;
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
+  // Double this if using ulong2.
   *cthread_count *= vecsize;
 
   // N's to search each time a kernel is run:
@@ -492,6 +492,10 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   status = clBuildProgram(program, 1, &devices[deviceno], /*"-g"*/NULL , NULL, NULL);
   if (status != CL_SUCCESS)  {
     fprintf(stderr, "Error: Building Program (clBuildProgram): %s\n", printable_cl_error(status));
+    size_t len;
+    char buffer[2048];
+    clGetProgramBuildInfo(program, devices[deviceno], CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
+    fprintf(stderr, "%s\n", buffer);
     return 1;
   }
 
