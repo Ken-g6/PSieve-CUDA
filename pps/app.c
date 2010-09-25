@@ -701,7 +701,7 @@ void app_init(void)
   */
   nstart = nmin;
 
-  printf("nstart=%u, nstep=%u, gpu_nstep=%u\n",nstart,nstep,ld_nstep);
+  printf("nstart=%u, nstep=%u\n",nstart,ld_nstep);
 
   // Allocate and fill bitmap.
   if (input_filename != NULL)
@@ -1013,9 +1013,9 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     i = __builtin_ctzll(kpos);
     kpos >>= i;
 
-    if (kpos <= kmax && kpos >= kmin && i < nstep) {
+    if (kpos <= kmax && kpos >= kmin && i < ld_nstep) {
       cands_found++;
-      //if (i < nstep)
+      //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
         test_factor(my_P,kpos,n+i,-1);
 #else
@@ -1029,7 +1029,7 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
 
     if (kneg <= kmax && kneg >= kmin) {
       cands_found++;
-      if (i < nstep)
+      if (i < ld_nstep)
         test_factor(my_P,kneg,n+i,+1);
     }
 #endif

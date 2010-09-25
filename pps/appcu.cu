@@ -269,9 +269,25 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
     bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
     cuda_finalize();
+    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+      pmin *= 2;
+      ld_nstep++;
+    }
+    if(pmin_1 < pmin) pmin = pmin_1;
+#ifndef _WIN32
+    fprintf(stderr, "This program will work by the time pmin == %lu.\n", pmin);
+#endif
     bexit(ERR_INVALID_PARAM);
+  }
+  // Use the 32-step algorithm where useful.
+  if(ld_nstep >= 32 && ld_nstep < 43 && (((uint64_t)1) << 32) <= pmin) {
+    if(ld_nstep != 32) printf("nstep changed to 32\n");
+    ld_nstep = 32;
+  } else {
+    printf("Didn't change nstep from %u\n", ld_nstep);
   }
   // Set the constants.
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
@@ -563,6 +579,39 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   return rax;
 }
 
+// Same function, specifically designed for 32-bit shift.
+// (And to not clobber rax.)
+__device__ uint64_t shiftmod_REDC32(const uint64_t a, 
+    const uint64_t N, uint64_t rax)
+{
+  uint64_t rcx;
+
+  //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
+  rax <<= 32; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rcx = a >> 32;
+  //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
+  //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
+  //rax *= Ns;
+  //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
+  //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
+  rcx += (rax!=0)?1:0;
+  //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
+  rax = __umul64hi(rax, N) + rcx;
+  //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
+  rcx = rax - N;
+  rax = (rax>N)?rcx:rax;
+
+#ifdef DEBUG64
+  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
+  {
+    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    cuda_finalize();
+    bexit(ERR_NEG);
+  }
+#endif
+
+  return rax;
+}
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 __device__ uint64_t
 invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
@@ -717,7 +766,60 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
 #endif
 }
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// This version works only for nstep (== d_mont_nstep) == 32
+// It also doesn't work for any algorithm that changes kpos, like TPS.
+#ifndef SEARCH_TWIN
+__device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint64_t &kpos,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t nextkpos;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
 
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)kpos, d_kernel_nstep);
+#endif
+  // Begin by finding nextkpos, kpos / 2^32.
+  nextkpos = shiftmod_REDC32(kpos, my_P, kpos*Ps);
+  do { // Remaining steps are all of equal size nstep
+    // Get K from the Montgomery form.
+    // This also calculates K / 2^64, in Montgomery form, at the same time!
+    kpos = mod_REDC(kpos, my_P, Ps);
+    //i = __ffsll(kpos)-1;
+    i = (unsigned int)kpos;
+    if(i != 0) {
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
+    } else {
+      i = (unsigned int)(kpos>>32);
+      i=63 - __clz (i & -i);
+    }
+
+    //kpos >>= i;
+    // Small kmax means testing the low and high bits of kpos separately.
+    if ((((unsigned int)(kpos>>32))>>i) == 0)
+      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
+#ifdef _DEVICEEMU
+        //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+        // Just flag this if kpos <= d_kmax.
+        if((kpos>>i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
+      }
+
+    // Proceed to the K for the next N.  Here that means just swapping kpos and nextkpos.
+    {
+      uint64_t temp = kpos;
+      kpos = nextkpos;
+      nextkpos = temp;
+    }
+    
+    n += d_nstep;
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+#endif
 // *** KERNELS ***
 
 // Start checking N's.
@@ -785,7 +887,25 @@ __global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps
     K[i] = k0;
   }
 }
+#ifndef SEARCH_TWIN
+// Continue checking N's for nstep == 32
+__global__ void d_check_more_ns_32(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
+  unsigned int n = N;
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  uint64_t k0 = K[i];
+  unsigned char my_factor_found = factor_found_arr[i];
 
+  if(shift == 1) my_factor_found <<= 1;
+
+  d_check_some_ns_32(P[i], Ps[i], k0, n, my_factor_found, i);
+
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
+  factor_found_arr[i] = my_factor_found;
+  if(n < d_nmax) {
+    K[i] = k0;
+  }
+}
+#endif
 // *** Host Kernel-calling functions ***
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
@@ -815,18 +935,34 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef SEARCH_TWIN
       // Also make sure it's worthwhile to make a full shift conditional.
       // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time).
-      && P[0] > (((uint64_t)1)<<45)
+      && (ld_nstep == 32 || P[0] > (((uint64_t)1)<<45))
 #endif
     ) {
-    for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-      if(n >= *this_n_subsection) {
-        if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
-        shift = 1;
-        this_n_subsection--;
-      } else shift = 0;
-      d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
-      checkCUDAErr("kernel invocation");
+#ifndef SEARCH_TWIN
+    if(ld_nstep == 32) {
+      for(n = nmin; n < nmax; n += ld_kernel_nstep) {
+        if(n >= *this_n_subsection) {
+          if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
+          shift = 1;
+          this_n_subsection--;
+        } else shift = 0;
+        d_check_more_ns_32<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
+        checkCUDAErr("kernel invocation");
+      }
+    } else {
+#endif
+      for(n = nmin; n < nmax; n += ld_kernel_nstep) {
+        if(n >= *this_n_subsection) {
+          if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
+          shift = 1;
+          this_n_subsection--;
+        } else shift = 0;
+        d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
+        checkCUDAErr("kernel invocation");
+      }
+#ifndef SEARCH_TWIN
     }
+#endif
   } else {
     for(n = nmin; n < nmax; n += ld_kernel_nstep) {
       if(n >= *this_n_subsection) {
