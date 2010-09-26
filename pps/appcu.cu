@@ -644,6 +644,57 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 
 // Device-local function to iterate over some N's.
 // To avoid register pressure, clobbers i, and changes all non-const arguments.
+
+#ifdef SEARCH_TWIN
+#ifdef _DEVICEEMU
+#define TWIN_PRINT_NEG //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#else
+#define TWIN_PRINT_NEG
+#endif
+// Select the even one here, so as to use the zero count and shift.
+// The other side (whether positive or negative) is odd then, with no zeroes on the right.
+#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+// No zeroes on the right here.
+// Small kmax means testing the low and high bits of kpos separately.
+#define TWIN_TEST_NEG_SM \
+    kpos = my_P - kpos; \
+    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {\
+      TWIN_PRINT_NEG \
+      if(kpos >= d_kmin && n < d_nmax) my_factor_found |= 1; \
+    }
+#else
+#define TWIN_CHOOSE_EVEN
+#define TWIN_TEST_NEG_SM
+#endif
+
+#ifdef _DEVICEEMU
+#define PRINT_FACTOR_FOUND2(STAGE) //printf(STAGE "%lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#define PRINT_FACTOR_FOUND(STAGE) PRINT_FACTOR_FOUND2(STAGE)
+#else
+#define PRINT_FACTOR_FOUND(STAGE)
+#endif
+
+// Count trailing zeros of kpos and store that count in i.
+//i = __ffsll(kpos)-1;
+#define CTZLL_KPOS \
+    i = (unsigned int)kpos; \
+    if(i != 0) { \
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f; \
+    } else { \
+      i = (unsigned int)(kpos>>32); \
+      i=63 - __clz (i & -i); \
+    }
+
+// Test for a factor by shifting by the result of CTZLL_KPOS
+// Small kmax means testing the low and high bits of kpos separately.
+// STAGE is just a string printed when printing the status while debugging.
+#define TEST_SHIFT_SMALL_KMAX(STAGE) \
+    if ((((unsigned int)(kpos>>32))>>i) == 0) \
+      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) { \
+        PRINT_FACTOR_FOUND(STAGE) \
+        if((kpos>>i) >= d_kmin && i < d_nstep && n+i < l_nmax) my_factor_found |= 1; \
+      }
+
 __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
     unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
   uint64_t kpos;
@@ -660,19 +711,8 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
     kpos = k0;
-#ifdef SEARCH_TWIN
-    // Select the even one here, so as to use the zero count and shift.
-    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
-    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
-#endif
-    //i = __ffsll(kpos)-1;
-    i = (unsigned int)kpos;
-    if(i != 0) {
-      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-    } else {
-      i = (unsigned int)(kpos>>32);
-      i=63 - __clz (i & -i);
-    }
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
 
     if ((kpos >> i) <= d_kmax) {
 #ifdef _DEVICEEMU
@@ -722,42 +762,12 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
     kpos = k0;
-#ifdef SEARCH_TWIN
-    // Select the even one here, so as to use the zero count and shift.
-    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
-    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
-#endif
-    //i = __ffsll(kpos)-1;
-    i = (unsigned int)kpos;
-    if(i != 0) {
-      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-    } else {
-      i = (unsigned int)(kpos>>32);
-      i=63 - __clz (i & -i);
-    }
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
 
-    //kpos >>= i;
-    // Small kmax means testing the low and high bits of kpos separately.
-    if ((((unsigned int)(kpos>>32))>>i) == 0)
-      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-        //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-        // Just flag this if kpos <= d_kmax.
-        if((kpos>>i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
-      }
-#ifdef SEARCH_TWIN
-    kpos = my_P - kpos;
-    // No zeroes on the right here.
-    // Small kmax means testing the low and high bits of kpos separately.
-    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-      // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found |= 1;
-    }
-#endif
+    TEST_SHIFT_SMALL_KMAX()
+
+    TWIN_TEST_NEG_SM
 
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
@@ -787,42 +797,10 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
     kpos = k0;
-#ifdef SEARCH_TWIN
-    // Select the even one here, so as to use the zero count and shift.
-    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
-    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
-#endif
-    //i = __ffsll(kpos)-1;
-    i = (unsigned int)kpos;
-    if(i != 0) {
-      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-    } else {
-      i = (unsigned int)(kpos>>32);
-      i=63 - __clz (i & -i);
-    }
-
-    //kpos >>= i;
-    // Small kmax means testing the low and high bits of kpos separately.
-    if ((((unsigned int)(kpos>>32))>>i) == 0)
-      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-        //printf("part 1: %lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-        // Just flag this if kpos <= d_kmax.
-        if((kpos>>i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
-      }
-#ifdef SEARCH_TWIN
-    kpos = my_P - kpos;
-    // No zeroes on the right here.
-    // Small kmax means testing the low and high bits of kpos separately.
-    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-      // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found |= 1;
-    }
-#endif
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 1/2: ")
+    TWIN_TEST_NEG_SM
 
     // Skip 32 N's.
     kPs = k0 * Ps;
@@ -830,42 +808,10 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
     n += 32;
     
     // Test again here.
-#ifdef SEARCH_TWIN
-    // Select the even one here, so as to use the zero count and shift.
-    // The other side (whether positive or negative) is odd then, with no zeroes on the right.
-    if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
-#endif
-    //i = __ffsll(kpos)-1;
-    i = (unsigned int)kpos;
-    if(i != 0) {
-      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-    } else {
-      i = (unsigned int)(kpos>>32);
-      i=63 - __clz (i & -i);
-    }
-
-    //kpos >>= i;
-    // Small kmax means testing the low and high bits of kpos separately.
-    if ((((unsigned int)(kpos>>32))>>i) == 0)
-      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-        //printf("part 2: %lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-        // Just flag this if kpos <= d_kmax.
-        if((kpos>>i) >= d_kmin && i < d_nstep && n+i < l_nmax) my_factor_found |= 1;
-      }
-#ifdef SEARCH_TWIN
-    kpos = my_P - kpos;
-    // No zeroes on the right here.
-    // Small kmax means testing the low and high bits of kpos separately.
-    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {
-#ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-      // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin && n < l_nmax) my_factor_found |= 1;
-    }
-#endif
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 2/2: ")
+    TWIN_TEST_NEG_SM
 
     // Increase k0 the full 64 N's, using the same kPs.
     k0 = onemod_REDC(my_P, kPs);
@@ -909,57 +855,30 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
 }
 
 // Continue checking N's.
-__global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
-  unsigned int n = N;
-  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0 = K[i];
-  unsigned char my_factor_found = factor_found_arr[i];
-
-  if(shift == 1) my_factor_found <<= 1;
-
-  d_check_some_ns(P[i], Ps[i], k0, n, my_factor_found, i);
-
-  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  factor_found_arr[i] = my_factor_found;
-  if(n < d_nmax) {
-    K[i] = k0;
-  }
+#define CHECK_MORE_NS_KERNEL(TYPE) \
+__global__ void d_check_more_ns##TYPE (const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) { \
+  unsigned int n = N; \
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x; \
+  uint64_t k0 = K[i]; \
+  unsigned char my_factor_found = factor_found_arr[i]; \
+ \
+  if(shift == 1) my_factor_found <<= 1; \
+ \
+  d_check_some_ns##TYPE (P[i], Ps[i], k0, n, my_factor_found, i); \
+ \
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x; \
+  factor_found_arr[i] = my_factor_found; \
+  if(n < d_nmax) { \
+    K[i] = k0; \
+  } \
 }
 
+CHECK_MORE_NS_KERNEL()
 // Continue checking N's for small kmax.
-__global__ void d_check_more_ns_small_kmax(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
-  unsigned int n = N;
-  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0 = K[i];
-  unsigned char my_factor_found = factor_found_arr[i];
-
-  if(shift == 1) my_factor_found <<= 1;
-
-  d_check_some_ns_small_kmax(P[i], Ps[i], k0, n, my_factor_found, i);
-
-  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  factor_found_arr[i] = my_factor_found;
-  if(n < d_nmax) {
-    K[i] = k0;
-  }
-}
+CHECK_MORE_NS_KERNEL(_small_kmax)
 // Continue checking N's for nstep == 32
-__global__ void d_check_more_ns_32(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) {
-  unsigned int n = N;
-  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0 = K[i];
-  unsigned char my_factor_found = factor_found_arr[i];
+CHECK_MORE_NS_KERNEL(_32)
 
-  if(shift == 1) my_factor_found <<= 1;
-
-  d_check_some_ns_32(P[i], Ps[i], k0, n, my_factor_found, i);
-
-  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  factor_found_arr[i] = my_factor_found;
-  if(n < d_nmax) {
-    K[i] = k0;
-  }
-}
 // *** Host Kernel-calling functions ***
 
 #define CALL_LOOP(KERNEL) \
