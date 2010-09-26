@@ -957,7 +957,7 @@ static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const uns
 #endif
 
   // Convert back to standard.
-  //r = mod_REDC (r, N, Ns);
+  r = mod_REDC (r, N, Ns);
 
   return r;
 }
@@ -1005,7 +1005,7 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
     kPs = k0 * Ps;
-    kpos = onemod_REDC(my_P, kPs);
+    kpos = k0;
 #ifdef SEARCH_TWIN
     kneg = my_P - kpos;
 #endif

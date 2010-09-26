@@ -248,18 +248,16 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
-    //if((++i) >= 86) {
+    if(pstart == pmin || (++i) >= 86) {
 #ifdef USE_BOINC
       bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
       return 0;
 #endif
-/*
     } else {
       sleep(7);
       bmsg("Trying again...");
     }
-*/
   }
 
   //ld_bitsmask--; // Finalize bitsmask
@@ -283,7 +281,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     bexit(ERR_INVALID_PARAM);
   }
   // Use the 32-step algorithm where useful.
-  if(ld_nstep >= 32 && ld_nstep < 43 && (((uint64_t)1) << 32) <= pmin) {
+  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
   } else {
@@ -342,7 +340,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     for(j=7; j >= 0; j--) {
       // Divide the range into 8 sub-ranges of N's.
       next_n = nmin + ((nmax - nmin + 8)/8)*(8-j);
-      // Pretty inefficient, but no more so than one kernel call set.
+      // Pretty inefficient, but no more so than one kernel call loop.
       while(test_n < next_n) test_n += ld_kernel_nstep;
       n_subsection_start[j] = test_n;
       // If test_n wasn't changed at all, shrink the range.
@@ -776,7 +774,6 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
 // Device-local function to iterate over some N's.
 // To avoid register pressure, clobbers i, and changes all non-const arguments.
 // This version works only for nstep (== d_mont_nstep) == 32
-// It also doesn't work for any algorithm that changes kpos, like TPS.
 __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
     unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
   uint64_t kpos, kPs;
@@ -878,6 +875,7 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
 #endif
 }
+
 // *** KERNELS ***
 
 // Start checking N's.
@@ -964,6 +962,16 @@ __global__ void d_check_more_ns_32(const uint64_t *P, const uint64_t *Ps, uint64
 }
 // *** Host Kernel-calling functions ***
 
+#define CALL_LOOP(KERNEL) \
+      for(n = nmin; n < nmax; n += ld_kernel_nstep) { \
+        if(n >= *this_n_subsection) { \
+          if(n > *this_n_subsection) fprintf(stderr, #KERNEL " Warning: N, %u, > expected N, %u\n", n, *this_n_subsection); \
+          shift = 1; \
+          this_n_subsection--; \
+        } else shift = 0; \
+        KERNEL <<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift); \
+        checkCUDAErr("kernel " #KERNEL "invocation"); \
+      }
 // Pass the arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   const unsigned int cblockcount = cthread_count/BLOCKSIZE;
@@ -996,39 +1004,15 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
     ) {
 //#ifndef SEARCH_TWIN
     if(ld_nstep == 32) {
-      for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-        if(n >= *this_n_subsection) {
-          if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
-          shift = 1;
-          this_n_subsection--;
-        } else shift = 0;
-        d_check_more_ns_32<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
-        checkCUDAErr("kernel invocation");
-      }
+      CALL_LOOP(d_check_more_ns_32)
     } else {
 //#endif
-      for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-        if(n >= *this_n_subsection) {
-          if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
-          shift = 1;
-          this_n_subsection--;
-        } else shift = 0;
-        d_check_more_ns_small_kmax<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
-        checkCUDAErr("kernel invocation");
-      }
+      CALL_LOOP(d_check_more_ns_small_kmax)
 //#ifndef SEARCH_TWIN
     }
 //#endif
   } else {
-    for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-      if(n >= *this_n_subsection) {
-        if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
-        shift = 1;
-        this_n_subsection--;
-      } else shift = 0;
-      d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift);
-      checkCUDAErr("kernel invocation");
-    }
+    CALL_LOOP(d_check_more_ns)
   }
 }
 

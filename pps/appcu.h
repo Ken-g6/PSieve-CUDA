@@ -16,7 +16,7 @@
 #ifdef SEARCH_TWIN
 #define ITERATIONS_PER_KERNEL 100
 #else
-#define ITERATIONS_PER_KERNEL 300
+#define ITERATIONS_PER_KERNEL 512
 #endif
 
 // Maximum time to sleep per K set, per N, in nanoseconds.
