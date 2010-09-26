@@ -74,6 +74,7 @@ const int check_ns_overlap = 50000;
 
 static unsigned int ld_kernel_nstep;
 static int max_ns_delay = 0;
+static int ccapability = 1;
 
 //globals for cuda
 cudaEvent_t stop;
@@ -201,6 +202,8 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     else cthread_count -= cthread_count % BLOCKSIZE;
   }
   cthread_count *= gpuprop.multiProcessorCount;
+
+  ccapability = gpuprop.major;
 
   if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
@@ -864,6 +867,137 @@ __device__ void d_check_some_ns_22(const uint64_t my_P, const uint64_t Ps, uint6
 #endif
 }
 
+// *** Fermi check_some_ns ***
+// Same as functions above, but use a different method to check for a factor.
+
+// FERMI_TEST_SMALL_KMAX uses the "alternate algorithm" from the CPU version to pre-test for factors.
+#define TEST_SHIFT_SMALL_KMAX2(STAGE) TEST_SHIFT_SMALL_KMAX(STAGE)
+#define FERMI_TEST_SMALL_KMAX(STAGE) \
+    i = (unsigned int)kpos; \
+    if(i != 0) { \
+      i=i & -i; \
+      if(__umulhi((unsigned int)d_kmax, i) >= ((unsigned int)(kpos>>32))) { \
+        i=(__float_as_int(__uint2float_rz(i))>>23)-0x7f; \
+        TEST_SHIFT_SMALL_KMAX2("Fermi " STAGE) \
+      } \
+    } else { \
+      i = (unsigned int)(kpos>>32); \
+      i=63 - __clz (i & -i); \
+      TEST_SHIFT_SMALL_KMAX2("Fermi rare case " STAGE) \
+    }
+
+__device__ void d_check_some_ns_small_kmax_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do {
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    kpos = k0;
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX()
+    TWIN_TEST_NEG_SM
+
+    // Proceed to the K for the next N.
+    // kpos is destroyed, just to keep the register count down.
+    // Despite the Montgomery step, this isn't really in Montgomery form.
+    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
+    kpos = k0 * Ps;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
+    n += d_nstep;
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// This version works only for nstep (== d_mont_nstep) == 32
+__device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    kpos = k0;
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 1/2: ")
+    TWIN_TEST_NEG_SM
+
+    // Skip 32 N's.
+    kPs = k0 * Ps;
+    kpos = shiftmod_REDC32(k0, my_P, kPs);
+    n += 32;
+    
+    // Test again here.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 2/2: ")
+    TWIN_TEST_NEG_SM
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    k0 = onemod_REDC(my_P, kPs);
+    n += 32;
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
+// Same thing, but this version works only for nstep == 22
+__device__ void d_check_some_ns_22_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    kpos = k0;
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 1/3: ")
+    TWIN_TEST_NEG_SM
+
+    // Skip 21 N's.
+    kPs = k0 * Ps;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 2/3: ")
+
+    // Skip 21 more N's.
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 3/3: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    k0 = onemod_REDC(my_P, kPs);
+    n += 22;
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
 // *** KERNELS ***
 
 // Start checking N's.
@@ -922,6 +1056,13 @@ CHECK_MORE_NS_KERNEL(_small_kmax)
 CHECK_MORE_NS_KERNEL(_32)
 // Continue checking N's for nstep == 22
 CHECK_MORE_NS_KERNEL(_22)
+// Fermi versions of the above:
+// Continue checking N's for small kmax.
+CHECK_MORE_NS_KERNEL(_small_kmax_fermi)
+// Continue checking N's for nstep == 32
+CHECK_MORE_NS_KERNEL(_32_fermi)
+// Continue checking N's for nstep == 22
+CHECK_MORE_NS_KERNEL(_22_fermi)
 
 // *** Host Kernel-calling functions ***
 
@@ -961,21 +1102,31 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   if(kmax < (((uint64_t)1)<<31)
 //#ifndef SEARCH_TWIN
       // Also make sure it's worthwhile to make a full shift conditional.
-      // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time).
+      // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time) at 1<<46.
+      // But I have extra tricks for Fermi. :)
       && (ld_nstep == 32 || P[0] > (((uint64_t)1)<<43))
 //#endif
-    ) {
-//#ifndef SEARCH_TWIN
-    if(ld_nstep == 22) {
-      CALL_LOOP(d_check_more_ns_22)
-    } else if(ld_nstep == 32) {
-      CALL_LOOP(d_check_more_ns_32)
+        )
+  {
+    if(ccapability >= 2) {
+      // Use a Fermi kernel.
+      if(ld_nstep == 22) {
+        CALL_LOOP(d_check_more_ns_22_fermi)
+      } else if(ld_nstep == 32) {
+        CALL_LOOP(d_check_more_ns_32_fermi)
+      } else {
+        CALL_LOOP(d_check_more_ns_small_kmax_fermi)
+      }
     } else {
-//#endif
-      CALL_LOOP(d_check_more_ns_small_kmax)
-//#ifndef SEARCH_TWIN
+      if(ld_nstep == 22) {
+        CALL_LOOP(d_check_more_ns_22)
+      } else if(ld_nstep == 32) {
+        CALL_LOOP(d_check_more_ns_32)
+      } else {
+        CALL_LOOP(d_check_more_ns_small_kmax)
+      }
     }
-//#endif
+    //#endif
   } else {
     CALL_LOOP(d_check_more_ns)
   }
