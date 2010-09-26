@@ -284,6 +284,11 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
+  }
+  // Use the 22-step algorithm where useful.
+  else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
+    if(ld_nstep != 22) printf("nstep changed to 22\n");
+    ld_nstep = 22;
   } else {
     printf("Didn't change nstep from %u\n", ld_nstep);
   }
@@ -313,13 +318,17 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
   if(ld_nstep == 32) ld_kernel_nstep /= 2;
+  else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
   // Finally, make sure it's a multiple of ld_nstep!!!
-  ld_kernel_nstep *= ld_nstep;
-  // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
-  if(ld_nstep == 32) ld_kernel_nstep *= 2;
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
+  else {
+    ld_kernel_nstep *= ld_nstep;
+    // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
+    if(ld_nstep == 32) ld_kernel_nstep *= 2;
+  }
 
   cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
@@ -582,37 +591,23 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
 
 // Same function, specifically designed for 32-bit shift.
 // (And to not clobber rax.)
-__device__ uint64_t shiftmod_REDC32(const uint64_t a, 
-    const uint64_t N, uint64_t rax)
-{
-  uint64_t rcx;
-
-  //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= 32; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
-  rcx = a >> 32;
-  //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
-  //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
-  //rax *= Ns;
-  //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
-  //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx += (rax!=0)?1:0;
-  //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = __umul64hi(rax, N) + rcx;
-  //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
-  rcx = rax - N;
-  rax = (rax>N)?rcx:rax;
-
-#ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
-  {
-    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
-    cuda_finalize();
-    bexit(ERR_NEG);
-  }
-#endif
-
-  return rax;
+#define SHIFTMOD_REDCX(NSTEP) \
+__device__ uint64_t shiftmod_REDC##NSTEP (const uint64_t a, \
+    const uint64_t N, uint64_t rax) \
+{ \
+  uint64_t rcx; \
+  rax <<= (64-NSTEP); \
+  rcx = a >> NSTEP; \
+  rcx += (rax!=0)?1:0; \
+  rax = __umul64hi(rax, N) + rcx; \
+  rcx = rax - N; \
+  rax = (rax>N)?rcx:rax; \
+  return rax; \
 }
+SHIFTMOD_REDCX(21)
+SHIFTMOD_REDCX(32)
+SHIFTMOD_REDCX(42)
+
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 __device__ uint64_t
 invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
@@ -822,6 +817,53 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
 #endif
 }
 
+// Same thing, but this version works only for nstep == 22
+__device__ void d_check_some_ns_22(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    kpos = k0;
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 1/3: ")
+    TWIN_TEST_NEG_SM
+
+    // Skip 21 N's.
+    kPs = k0 * Ps;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 2/3: ")
+
+    // Skip 21 more N's.
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 3/3: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    k0 = onemod_REDC(my_P, kPs);
+    n += 22;
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
 // *** KERNELS ***
 
 // Start checking N's.
@@ -878,6 +920,8 @@ CHECK_MORE_NS_KERNEL()
 CHECK_MORE_NS_KERNEL(_small_kmax)
 // Continue checking N's for nstep == 32
 CHECK_MORE_NS_KERNEL(_32)
+// Continue checking N's for nstep == 22
+CHECK_MORE_NS_KERNEL(_22)
 
 // *** Host Kernel-calling functions ***
 
@@ -918,11 +962,13 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 //#ifndef SEARCH_TWIN
       // Also make sure it's worthwhile to make a full shift conditional.
       // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time).
-      && (ld_nstep == 32 || P[0] > (((uint64_t)1)<<45))
+      && (ld_nstep == 32 || P[0] > (((uint64_t)1)<<43))
 //#endif
     ) {
 //#ifndef SEARCH_TWIN
-    if(ld_nstep == 32) {
+    if(ld_nstep == 22) {
+      CALL_LOOP(d_check_more_ns_22)
+    } else if(ld_nstep == 32) {
       CALL_LOOP(d_check_more_ns_32)
     } else {
 //#endif
