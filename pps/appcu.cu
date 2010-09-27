@@ -763,7 +763,7 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
     TWIN_CHOOSE_EVEN
     CTZLL_KPOS
 
-    TEST_SHIFT_SMALL_KMAX()
+    TEST_SHIFT_SMALL_KMAX("")
 
     TWIN_TEST_NEG_SM
 
@@ -900,7 +900,7 @@ __device__ void d_check_some_ns_small_kmax_fermi(const uint64_t my_P, const uint
     // Get a copy of K, which isn't in Montgomery form.
     kpos = k0;
     TWIN_CHOOSE_EVEN
-    FERMI_TEST_SMALL_KMAX()
+    FERMI_TEST_SMALL_KMAX("")
     TWIN_TEST_NEG_SM
 
     // Proceed to the K for the next N.
