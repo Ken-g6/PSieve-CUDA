@@ -85,16 +85,6 @@ VLONG mulmod_REDC (const VLONG a, const VLONG b,
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
 
-  /*
-#ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, b, N))
-  {
-    fprintf (stderr, "%sError, mulredc(%lu,%lu,%lu) = %lu\n", bmprefix(), a, b, N, rax);
-    bexit(1);
-  }
-#endif
-*/
-
   return rax;
 }
 
@@ -191,7 +181,7 @@ invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
 #endif
 
   // Convert back to standard.
-  //r = mod_REDC (r, N, Ns);
+  r = mod_REDC (r, N, Ns);
 
   return r;
 }
@@ -266,6 +256,40 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         my_factor_found.X = 1; \
     }
 #endif
+#if(VECSIZE == 2)
+#define ALL_CTZLL \
+      VEC_CTZLL(v,x) \
+      VEC_CTZLL(v,y)
+#define ALL_FLAG_TEST \
+      VEC_FLAG_TEST(x) \
+      VEC_FLAG_TEST(y)
+#define VEC_IF if(v.x == 0 || v.y == 0)
+#elif(VECSIZE == 4)
+#define ALL_CTZLL \
+      VEC_CTZLL(v,x) \
+      VEC_CTZLL(v,y) \
+      VEC_CTZLL(v,z) \
+      VEC_CTZLL(v,w)
+#define ALL_FLAG_TEST \
+      VEC_FLAG_TEST(x) \
+      VEC_FLAG_TEST(y) \
+      VEC_FLAG_TEST(z) \
+      VEC_FLAG_TEST(w)
+#define VEC_IF if(v.x == 0 || v.y == 0 || v.z == 0 || v.w == 0)
+#else
+#error "Invalid vecsize" #VECSIZE
+#endif
+      // ALL_CTZLL happens, but my calculator can't compute how rarely!
+      // About 1 in every 2^30 times.
+#define ALL_IF_CTZLL \
+    v = V2VINT(kpos); \
+    VEC_IF { \
+      ALL_CTZLL \
+    } else { \
+      v=31u - clz (v & -v); \
+    }
+
+
 
 __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N
                                  // Device constants
@@ -282,7 +306,7 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   uint n = N;
   VLONG k0;// = K[v.x];
   VINT my_factor_found;// = factor_found_arr[v.x];
-  VLONG kpos, kPs;
+  VLONG kpos; //, kPs;
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
@@ -298,46 +322,17 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = k0 * Ps;
-    kpos = onemod_REDC(my_P, kPs);
+    kpos = k0;
     //i = __ffsll(kpos)-1;
-    v = V2VINT(kpos);
-    if(v.x == 0 || v.y == 0
-#if VECSIZE >= 3
-        || v.z == 0
-#if VECSIZE >= 4
-        || v.w == 0
-#endif
-#endif
-      ) {
-      // Happens, but my calculator can't compute how rarely!
-      // About 1 in every 2^30 times.
-      VEC_CTZLL(v,x)
-      VEC_CTZLL(v,y)
-#if VECSIZE >= 3
-      VEC_CTZLL(v,z)
-#if VECSIZE >= 4
-      VEC_CTZLL(v,w)
-#endif
-#endif
-    } else {
-      // Happens most of the time.
-      v=31u - clz (v & -v);
-    }
+    ALL_IF_CTZLL
 
     // Just flag this if kpos <= d_kmax.
-    VEC_FLAG_TEST(x)
-    VEC_FLAG_TEST(y)
-#if VECSIZE >= 3
-    VEC_FLAG_TEST(z)
-#if VECSIZE >= 4
-    VEC_FLAG_TEST(w)
-#endif
-#endif
+    ALL_FLAG_TEST
 
     // Proceed to the K for the next N.
-    // kPs is destroyed, just to keep the register count down.
-    k0 = shiftmod_REDC(k0, my_P, kPs);
+    // kpos is destroyed, just to keep the register count down.
+    kpos = k0 * Ps;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
     n += D_NSTEP;
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
