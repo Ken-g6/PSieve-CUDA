@@ -13,7 +13,11 @@
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
-#define ITERATIONS_PER_KERNEL 300
+#ifdef SEARCH_TWIN
+#define ITERATIONS_PER_KERNEL 100
+#else
+#define ITERATIONS_PER_KERNEL 512
+#endif
 
 // Maximum time to sleep per K set, per N, in nanoseconds.
 // For PPSE sieve (7/2010), 3*2,000,000 N's = about 6 seconds.
@@ -28,6 +32,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count);
 void check_ns(const uint64_t *P, const unsigned int cthread_count);
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay);
 void cuda_finalize(void);
+int get_n_subsection_start(int index);
 
 extern unsigned int ld_nstep;
 extern int ld_bbits;

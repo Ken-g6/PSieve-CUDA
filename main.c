@@ -70,9 +70,9 @@ int num_threads = 1;
 uint64_t pmin = 0, pmax = 0;
 unsigned int quiet_opt = 0;
 unsigned int priority_opt = 0;
+uint64_t pstart;
 
 /* Local variables */
-static uint64_t pstart;
 static char *pmin_str = NULL;
 static char *checkpoint_filename = NULL;
 static /*const*/ char *empty_string = "";

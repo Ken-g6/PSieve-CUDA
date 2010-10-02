@@ -50,27 +50,32 @@
 #define INLINE static __inline
 #endif
 
+#ifdef SEARCH_TWIN
+#define KSTEP 6
+#define KOFFSET 3
+#else
+#define KSTEP 2
+#define KOFFSET 1
+#endif
 
-#ifndef __x86_64__
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
 // MPOS = result (32-bit)
 // KPOS = input (64-bit; evaluated twice!)
 // ID = a unique ID string.
-#ifdef __i386__
+#if !defined(__x86_64__) && defined(__i386__) && defined(__GNUC__)
 #define BSFQ(MPOS,KPOS,ID)          asm volatile \
             ( 		"bsfl	%[k0l], %[pos]	\n" \
-                "	jnz	bsflok"ID"		\n" \
+                "	jnz	bsflok" #ID "		\n" \
                 "	bsfl	%[k0h], %[pos]	\n" \
                 "	addl	$32, %[pos]	\n" \
-                "bsflok"ID":" \
+                "bsflok" #ID ":" \
                 : [pos] "=r" (MPOS) \
                 : [k0l] "rm" ((unsigned int)(KPOS)), \
                 [k0h] "rm" ((unsigned int)((KPOS) >> 32)) \
                 : "cc" )
 #else
 // If anyone wants to compile on some non-x86 platform somehow...
-#define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS);
-#endif
+#define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS)
 #endif
 
 #define FORMAT_NEWPGEN 1
@@ -104,6 +109,10 @@ static unsigned char** factor_found;
 #endif
 static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
+static uint64_t r0arr[9];
+static int bbitsarr[9];
+static unsigned int kstep = KSTEP;
+static unsigned int koffset = KOFFSET;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -151,9 +160,9 @@ static void __attribute__((noinline))
 #endif
 test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
-  uint64_t b = k/2;
+  uint64_t b = k/kstep;
 
-  if((k & 1) && n >= nmin && n < nmax) { // k is odd.
+  if((k == kstep*b+koffset) && n >= nmin && n < nmax) { // k is odd.
     if (bitmap == NULL) {
       unsigned int khigh = (unsigned int)(k>>32);
       uint64_t mod31 = (uint64_t)1;
@@ -183,9 +192,14 @@ test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 static FILE* scan_input_file(const char *fn)
 {
   FILE *file;
+#ifdef SEARCH_TWIN
+  uint64_t k0, k1, k, d, p0;
+  unsigned int n0, n1, n, m;
+#else
   uint64_t k0, k1, k, p0;
   unsigned int n0, n1, d, n;
-  int filesearch_proth;
+#endif
+  int filesearch_proth = 1;
   char ch;
 
   if ((file = bfopen(fn,"r")) == NULL)
@@ -194,7 +208,13 @@ static FILE* scan_input_file(const char *fn)
     bexit(ERR_FOPEN);
   }
 
-
+#ifdef SEARCH_TWIN
+  search_proth = +1;
+  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+             &m,&n,&k) == 3 && m == n)
+    file_format = FORMAT_ABCD;
+  else if (fscanf(file,"%"SCNu64":T:%*c:2:%c",&p0,&ch) == 2 && ch == '3')
+#else
   if (fscanf(file,"ABCD %"SCNu64"*2^$a%c1 [%u]",
              &k,&ch,&n) == 3)
   {
@@ -202,6 +222,7 @@ static FILE* scan_input_file(const char *fn)
     search_proth = (ch=='+')?1:-1;
   }
   else if (fscanf(file,"%"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) == 2 && (filesearch_proth == 1 || filesearch_proth == -1 || filesearch_proth == 255 || filesearch_proth == 257))
+#endif
   {
     search_proth = (int)((char)filesearch_proth);
     file_format = FORMAT_NEWPGEN;
@@ -238,20 +259,35 @@ static FILE* scan_input_file(const char *fn)
           d *= 10;
           d += c-'0';
         }
+#ifdef SEARCH_TWIN
+        k += d;
+#else
         n += d;
+#endif
         while(c != '\n') c=getc(file);
       }
       //while (fscanf(file," %u",&d) == 1)
 
+#ifdef SEARCH_TWIN
+      if (k1 < k)
+        k1 = k;
+      if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
+                 &m,&n,&k) == 3 && m == n)
+      {
+#ifndef USE_BOINC
+        if((((int)n)&15) == 1) printf("\rFound N=%u\r", n);
+#endif
+#else
       if (n1 < n)
         n1 = n;
-
       if (fscanf(file, " ABCD %"SCNu64"*2^$a%c1 [%u]",
                  &k,&ch,&n) == 3)
       {
 #ifndef USE_BOINC
         if((((int)k)&15) == 1) printf("\rFound K=%"SCNu64"\r", k);
 #endif
+#endif
+
         fflush(stdout);
         if (k0 > k)
           k0 = k;
@@ -282,6 +318,7 @@ static FILE* scan_input_file(const char *fn)
         n1 = n;
     }
   }
+  n1++;
 
   if (ferror(file))
   {
@@ -290,14 +327,15 @@ static FILE* scan_input_file(const char *fn)
   }
 
   rewind(file);
+#ifdef SEARCH_TWIN
+  if (file_format == FORMAT_ABCD)
+  {
+    k0 = kstep*k0+koffset;
+    k1 = kstep*k1+koffset;
+  }
+#endif
   printf("Found K's from %"SCNu64" to %"SCNu64".\n", k0, k1);
   printf("Found N's from %u to %u.\n", n0, n1);
-
-  //if (file_format == FORMAT_ABCD)
-  //{
-    //k0 = 6*k0+3;
-    //k1 = 6*k1+3;
-  //}
 
   if (kmin < k0)
     kmin = k0;
@@ -316,7 +354,11 @@ static void read_newpgen_file(const char *fn, FILE* file)
   //FILE *file;
   uint64_t k, p0;
   unsigned int n, line, count;
+#ifdef SEARCH_TWIN
+  char ch;
+#else
   int filesearch_proth;
+#endif
 
   if(file == NULL) {
     if ((file = bfopen(fn,"r")) == NULL)
@@ -325,26 +367,33 @@ static void read_newpgen_file(const char *fn, FILE* file)
       bexit(ERR_FOPEN);
     }
   }
-
+#ifdef SEARCH_TWIN
+  if (fscanf(file," %"SCNu64":T:%*c:2:%c",&p0,&ch) != 2 || ch != '3')
+  {
+    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
+    exit(EXIT_FAILURE);
+  }
+#else
   if (fscanf(file," %"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) != 2)
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
     bexit(ERR_SCANF);
   }
+#endif
 
   line = 0;
   count = 0;
   while (fscanf(file," %"SCNu64" %u",&k,&n) == 2)
   {
     line++;
-    if ((k&1) != 1)
+    if ((k%kstep) != koffset)
     {
       fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
       bexit(ERR_SCANF);
     }
     if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
     {
-      uint64_t bit = k/2-b0;
+      uint64_t bit = k/kstep-b0;
       bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
       count++; /* TODO: Don't count duplicates */
     }
@@ -364,10 +413,13 @@ static void read_newpgen_file(const char *fn, FILE* file)
 
 static void read_abcd_file(const char *fn, FILE *file)
 {
-  //FILE *file;
-  //char buf[80];
+#ifdef SEARCH_TWIN
+  uint64_t k, d;
+  unsigned int n, m, count;
+#else
   uint64_t k;
   unsigned int n, count, d;
+#endif
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
@@ -377,19 +429,28 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_FOPEN);
     }
   }
-  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
+#ifdef SEARCH_TWIN
+  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
+             &m,&n,&k) != 3 || m != n)
+#else
+  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
         &k,&n) != 2)
+#endif
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
     bexit(ERR_SCANF);
   }
 
   count = 0;
-  while(getc(file) != '\n');
+  //while(getc(file) != '\n');
   printf("Reading ABCD file.\n");
   while (1)
   {
-    uint64_t bit = (k-kmin)/2;
+#ifdef SEARCH_TWIN
+    uint64_t bit = k-b0;
+#else
+    uint64_t bit = (k-kmin)/kstep;
+#endif
     unsigned int bo8 = (unsigned int)(bit/8);
     unsigned int bm8 = (unsigned int)(1 << bit%8);
     /*if(k < kmin || k > kmax || bit < 0 || bit > (kmax-kmin)/2) {
@@ -397,14 +458,15 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_INVALID_PARAM);
     }*/
     if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
+    //printf("Read %lu*2^%d+/-1\n", k, n);
     count++;
-    while(getc(file) != '\n');
-    //while (fscanf(file," %u",&d) == 1)
     while(1)
     {
       char c = getc(file);
+      while(c == 10) c = getc(file);
       if(!isdigit(c)) {
         ungetc(c, file);
+        //printf("Read char %d, which is not a digit.\n", c);
         break;
       }
       d = c-'0';
@@ -413,25 +475,35 @@ static void read_abcd_file(const char *fn, FILE *file)
         d += c-'0';
       }
 
+#ifdef SEARCH_TWIN
+      k += d;
+      bit = k-b0;
+      bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
+#else
       n += d;
-      /*if(n > nmax) {
-        printf("\n\nN error: N = %u, but nmax = %u\n\n\n", n, nmax);
-        if(file == NULL) printf("\n\nError: File was closed!\n");
-        bexit(ERR_INVALID_PARAM);
-      }*/
       if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
+      //printf("Read %lu*2^%d+/-1\n", k, n);
+#endif
       count++;
       while(c != '\n') c=getc(file);
     }
 #ifndef USE_BOINC
+#ifdef SEARCH_TWIN
+    if((((int)n)&15) == 1) printf("\rRead N=%u\r", n);
+#else
     if((((int)k)&15) == 1) printf("\rRead K=%"SCNu64"\r", k);
+#endif
 #endif
     fflush(stdout);
 
-    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]",
-          &k,&n) != 2) {
+#ifdef SEARCH_TWIN
+    if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
+               &m,&n,&k) != 3 || m != n)
+#else
+    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
+          &k,&n) != 2)
+#endif
       break;
-    }
   }
 
   if (ferror(file))
@@ -453,7 +525,7 @@ static void read_abcd_file(const char *fn, FILE *file)
 */
 void app_banner(void)
 {
-  printf("ppsieve version " APP_VERSION " (testing)\n");
+  printf(APP_NAME " version " APP_VERSION " (testing)\n");
 #ifdef __GNUC__
   printf("Compiled " __DATE__ " with GCC " __VERSION__ "\n");
 #endif
@@ -499,7 +571,7 @@ int app_parse_option(int opt, char *arg, const char *source)
       break;
 
     case 'm':
-      status = parse_uint(&user_cthread_count,arg,1,(1U<<14));
+      status = parse_uint(&user_cthread_count,arg,1,(1U<<31));
       break;
       
     case 'n':
@@ -521,10 +593,23 @@ int app_parse_option(int opt, char *arg, const char *source)
     case 'd':
       status = parse_uint((unsigned int *)(&device_opt),arg,0,INT32_MAX);
       break;
+      
+    case 'M':
+      // Change K's modulus.
+      status = parse_uint(&kstep,arg,1,(1U<<31)-1);
+      if(koffset >= kstep) koffset = kstep/2;
+      break;
 
+    case 's':
+      // Change K's modoffset.
+      status = parse_uint(&koffset,arg,1,(1U<<31)-1);
+      break;
+
+#ifndef SEARCH_TWIN
     case 'R':
       search_proth = -1;
       break;
+#endif
 
 #ifdef VECSIZE
     case 'v':
@@ -546,12 +631,17 @@ void app_help(void)
   printf("-f --factors=FILE  Write factors to FILE (default `%s')\n",
          FACTORS_FILENAME_DEFAULT);
   printf("-i --input=FILE    Read initial sieve from FILE\n");
+  printf("-M --modulus       (Default %u\n", KSTEP);
+  printf("-s --modshift      Print only k's == s mod M. Default %u, or M/2\n",
+      KOFFSET);
   printf("-k --kmin=K0\n");
   printf("-K --kmax=K1       Sieve for primes k*2^n+/-1 with K0 <= k <= K1\n");
   printf("-m --mthreads=M    Force M threads or blocks/multiprocessor.\n");
   printf("-n --nmin=N0\n");
   printf("-N --nmax=N1       Sieve for primes k*2^n+/-1 with N0 <= n <= N1\n");
+#ifndef SEARCH_TWIN
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
+#endif
 #ifdef VECSIZE
   printf("-v --vecsize=N     Use the given vector size (2 or 4).\n");
 #endif
@@ -624,10 +714,10 @@ void app_init(void)
     bexit(ERR_INVALID_PARAM);
   }
 
-  b0 = kmin/2;
-  b1 = kmax/2;
-  kmin = b0*2+1;
-  kmax = b1*2+1;
+  b0 = kmin/kstep;
+  b1 = kmax/kstep;
+  kmin = b0*kstep+koffset;
+  kmax = b1*kstep+koffset;
 
   for (nstep = 1; (kmax << nstep) < pmin; nstep++)
     ;
@@ -643,7 +733,7 @@ void app_init(void)
   */
   nstart = nmin;
 
-  printf("nstart=%u, nstep=%u, gpu_nstep=%u\n",nstart,nstep,ld_nstep);
+  printf("nstart=%u, nstep=%u\n",nstart,ld_nstep);
 
   // Allocate and fill bitmap.
   if (input_filename != NULL)
@@ -699,7 +789,7 @@ void app_init(void)
 #endif
 #endif
 
-  printf("ppsieve initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n < %u\n",
+  printf(APP_NAME " initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n < %u\n",
          kmin,kmax,nmin,nmax);
   fflush(stdout);
 }
@@ -715,6 +805,17 @@ unsigned int app_thread_init(int th)
     cthread_count = cuda_app_init(device_opt, user_cthread_count);
   } else {
     cthread_count = cuda_app_init(th, user_cthread_count);
+  }
+  // Create r0arr (which gives starting values for the REDC code.)
+  //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);
+  for(i=0; i < 8; i++) {
+    int l_bbits;
+    unsigned int n = get_n_subsection_start(i+1);
+    l_bbits = lg2(n);
+
+    bbitsarr[i] = l_bbits - 6;
+    r0arr[i] = ((uint64_t)1) << (64-(n >> (l_bbits-5)));
+    //printf("r0arr[%d] = %lu\n", n, r0arr[i]);
   }
 
   // Allocate the factor_found arrays.
@@ -735,7 +836,7 @@ unsigned int app_thread_init(int th)
 /*  Multiplies for REDC code  */
 
 #if defined(GCC) && defined(__x86_64__)
-static uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
 {
   uint64_t t1, t2;
   __asm__
@@ -747,7 +848,7 @@ static uint64_t __umul64hi(uint64_t a, uint64_t b)
 }
 #else
 #if defined(GCC) && !defined(__x86_64__)
-static unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   unsigned int t1, t2;
   __asm__
@@ -757,28 +858,44 @@ static unsigned int __umulhi(unsigned int a, unsigned int b)
     : "cc");
   return t2;
 }
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  unsigned int t1, t2;
+  __asm__
+  ( "mull %3\n\t"
+    : "=a" (t1), "=d" (t2)
+    : "0" (a), "rm" (b)
+    : "cc");
+  return (((uint64_t)t2)<<32)+t1;
+}
 #else
-static unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   uint64_t c = (uint64_t)a * (uint64_t)b;
 
   return (unsigned int)(c >> 32);
 }
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  return (uint64_t)a * (uint64_t)b;
+}
 #endif
 
-static uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
 {
-  unsigned int           a_lo = (unsigned int)a;
-  uint64_t a_hi = a >> 32;
-  unsigned int           b_lo = (unsigned int)b;
-  uint64_t b_hi = b >> 32;
-  uint64_t m1 = a_lo * b_hi;
-  uint64_t m2 = a_hi * b_lo;
-  unsigned int           carry;
+  const unsigned int a_lo = (unsigned int)a;
+  const unsigned int a_hi = (unsigned int)(a >> 32);
+  const unsigned int b_lo = (unsigned int)b;
+  const unsigned int b_hi = (unsigned int)(b >> 32);
+  uint64_t m1 = __umul64(a_lo, b_hi);
+  uint64_t m2 = __umul64(a_hi, b_lo);
+  //unsigned int           carry;
 
-  carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
+  m1 += m2 + __umulhi(a_lo, b_lo);
+  //carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
 
-  return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
+  //return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
+  return __umul64(a_hi, b_hi) + (m1 >> 32);
 }
 #endif
 
@@ -878,21 +995,16 @@ static uint64_t shiftmod_REDC (const uint64_t a,
   return rax;
 }
 
-// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
+// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no longmod!
 /* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
-static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
-  uint64_t r;
-  int bbits = ld_bbits;
-
-  r = ld_r0;
-
+static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const unsigned int l_nmin, uint64_t r, int bbits) {
   // Now work through the other bits of nmin.
   for(; bbits >= 0; --bbits) {
     //if(N == 42070000070587) printf("r = %lu (CPU)\n", r);
     // Just keep squaring r.
     r = mulmod_REDC(r, r, N, Ns);
     // If there's a one bit here, multiply r by 2^-1 (aka divide it by 2 mod N).
-    if(nmin & (1u << bbits)) {
+    if(l_nmin & (1u << bbits)) {
       r += (r&1)?N:0;
       r >>= 1;
     }
@@ -903,30 +1015,36 @@ static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 #endif
 
   // Convert back to standard.
-  //r = mod_REDC (r, N, Ns);
+  r = mod_REDC (r, N, Ns);
 
   return r;
 }
 
-void test_one_p(const uint64_t my_P) {
-  unsigned int n = nmin; // = nmin;
+void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
+  unsigned int n = l_nmin; // = nmin;
   unsigned int i;
   uint64_t k0, kPs;
   uint64_t kpos;
+#ifdef SEARCH_TWIN
+  uint64_t kneg;
+#endif
   uint64_t Ps;
   int cands_found = 0;
+
+  //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
   
   // Better get this done before the first mulmod.
   Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
   
   // Calculate k0, in Montgomery form.
-  k0 = invpowmod_REDClr(my_P, Ps);
+  k0 = invpowmod_REDClr(my_P, Ps, l_nmin, r0, l_bbits);
+  //printf("k0[%u] = %lu\n", l_nmin, k0);
 
   //if(my_P == 42070000070587) printf("%lu^-1 = %lu (CPU)\n", my_P, Ps);
   /*
   // Verify the first result.
   kpos = 1;
-  for(i=0; i < nmin; i++) {
+  for(i=0; i < l_nmin; i++) {
       kpos += (kpos&1)?my_P:0;
       kpos >>= 1;
   }
@@ -936,28 +1054,50 @@ void test_one_p(const uint64_t my_P) {
     fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
     //bexit(ERR_NEG);
   } */
+#ifdef SEARCH_TWIN
+    // Select the first odd one.  All others are tested by overlap.
+    kpos = (k0&1)?k0:(my_P - k0);
+    if (kpos <= kmax && kpos >= kmin) {
+      cands_found++;
+      test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
+    }
+#endif
 
-  if(search_proth) k0 = my_P-k0;
+#ifndef SEARCH_TWIN
+  if(search_proth == 1) k0 = my_P-k0;
+#endif
 
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = k0 * Ps;
-    kpos = onemod_REDC(my_P, kPs);
-    i = __builtin_ctzll(kpos);
+    kPs = __umul64(k0, Ps);
+    kpos = k0;
+#ifdef SEARCH_TWIN
+    // Select the even one.
+    kpos = (kpos&1)?(my_P - kpos):kpos;
+#endif
     //i = __ffsll(kpos)-1;
+    //i = __builtin_ctzll(kpos);
+    BSFQ(i, kpos, 1);
 
-    kpos >>= i;
-    if (kpos <= kmax && kpos >= kmin) {
+#ifdef SEARCH_TWIN
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
+#else
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
+#endif
       cands_found++;
-      if (i < nstep)
-        test_factor(my_P,kpos,n+i,+1);
+      //if (i < ld_nstep)
+#ifdef SEARCH_TWIN
+        test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
+#else
+        test_factor(my_P,(kpos>>i),n+i,search_proth);
+#endif
     }
 
     // Proceed to the K for the next N.
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += ld_nstep;
-  } while (n < nmax);
+  } while (n < l_nmax);
   if(cands_found == 0) {
     fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
 #ifdef USE_BOINC
@@ -967,16 +1107,20 @@ void test_one_p(const uint64_t my_P) {
 }
 
 INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned int cthread_count) {
-  unsigned int i;
+  unsigned int i, j;
+  char factorlist;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
   for(i=0; i < cthread_count; i++) {
-    if(factor_found[th][i]) {
-      // Test that P.
-      test_one_p(P[i]);
+    if((factorlist=factor_found[th][i]) != 0) {
+      // Test that P, at the location(s) specified.
+      for(j=0; j < 8; j++) {
+        //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
+        if(factorlist & 1) test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        factorlist >>= 1;
+      }
     }
   }
-
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.

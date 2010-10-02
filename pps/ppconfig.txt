@@ -1,4 +1,4 @@
-# Configuration file for tpsieve.
+# Configuration file for ppsieve.
 #
 # option=arg in this file is overridden by --option=arg on the command-line.
 #

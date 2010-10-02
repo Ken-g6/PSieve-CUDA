@@ -16,30 +16,49 @@
 #include "stdint.h"
 
 #ifndef USE_OPENCL
-#define APP_VERSION "cuda-0.1.5a"
+#define APP_VERSION "cuda-0.2.1"
 #else
-#define APP_VERSION "cl-0.1.0a-beta"
+#define APP_VERSION "cl-0.2.0-beta"
 #endif
+
+#ifdef SEARCH_TWIN
+#define APP_PREFIX "tp"
+#else 
+#define APP_PREFIX "pp"
+#endif
+#define APP_NAME APP_PREFIX"sieve"
 
 /* Number of primes to buffer between calls to app_thread_fun()
  */
 #define APP_BUFLEN 6
 
-#define CHECKPOINT_FILENAME "ppcheck%s.txt"
-#define OLD_CHECKPOINT_FILENAME "ppcheckpoint.txt"
+#define CHECKPOINT_FILENAME APP_PREFIX"check%s.txt"
+#define OLD_CHECKPOINT_FILENAME APP_PREFIX"checkpoint.txt"
 
-#define CONFIG_FILENAME "ppconfig.txt"
+#define CONFIG_FILENAME APP_PREFIX"config.txt"
 
-#define FACTORS_FILENAME_DEFAULT "ppfactors.txt"
+#define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
+
+#define APP_SHORT_OPTS_BASE "k:K:n:N:i:f:b:d:m:M:s:"
+
+// Add Riesel if not SEARCH_TWIN
+#ifdef SEARCH_TWIN
+#define APP_SHORT_OPTS_TWINCOND APP_SHORT_OPTS_BASE
+#else
+#define APP_SHORT_OPTS_TWINCOND APP_SHORT_OPTS_BASE "R"
+#endif
 
 #ifdef USE_OPENCL
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:Rv:"
+#define APP_SHORT_OPTS APP_SHORT_OPTS_TWINCOND "v:"
 #else
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
+#define APP_SHORT_OPTS APP_SHORT_OPTS_TWINCOND
 #endif
+
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
+  {"modulus",       required_argument, 0, 'M'}, \
+  {"modshift",      required_argument, 0, 's'}, \
   {"nmin",          required_argument, 0, 'n'}, \
   {"nmax",          required_argument, 0, 'N'}, \
   {"input",         required_argument, 0, 'i'}, \

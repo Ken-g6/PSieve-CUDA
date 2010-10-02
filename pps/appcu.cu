@@ -1,5 +1,5 @@
 /* ex: set softtabstop=2 shiftwidth=2 expandtab: */
-/* app.cu -- (C) Ken Brazier February 2010.
+/* app.cu -- (C) Ken Brazier February - September 2010.
 
    Proth Prime Search sieve CUDA portion (for many K and many N).
 
@@ -42,6 +42,9 @@
 unsigned int ld_nstep;
 int ld_bbits;
 uint64_t ld_r0;
+// Stores the N to start at for the given bit position in 
+unsigned int n_subsection_start[9];
+static unsigned int *first_n_subsection = &n_subsection_start[7];
 
 // Device constants
 //__constant__ unsigned int d_bitsatatime;
@@ -71,10 +74,14 @@ const int check_ns_overlap = 50000;
 
 static unsigned int ld_kernel_nstep;
 static int max_ns_delay = 0;
+static int ccapability = 1;
 
 //globals for cuda
 cudaEvent_t stop;
 cudaStream_t stream;
+
+// A getter for n_subsection_start.  Yes, in C!
+int get_n_subsection_start(int index) { return n_subsection_start[index]; }
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -189,12 +196,14 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(cthread_count == 0) {
     // Threads per multiprocessor, based on compute capability, if not manually set.
     cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
-    if(gpuprop.major >= 2) cthread_count = 1024;
+    if(gpuprop.major >= 2) cthread_count = 1024*2;
   } else {
     if(cthread_count < BLOCKSIZE) cthread_count *= BLOCKSIZE;
     else cthread_count -= cthread_count % BLOCKSIZE;
   }
   cthread_count *= gpuprop.multiProcessorCount;
+
+  ccapability = gpuprop.major;
 
   if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
     fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
@@ -242,18 +251,16 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     //cudaFree(d_bitsskip);
     //}
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
-    //if((++i) >= 86) {
+    if(pstart == pmin || (++i) >= 86) {
 #ifdef USE_BOINC
       bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
       return 0;
 #endif
-/*
     } else {
       sleep(7);
       bmsg("Trying again...");
     }
-*/
   }
 
   //ld_bitsmask--; // Finalize bitsmask
@@ -263,9 +270,34 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 
   //assert((1ul << (64-nstep)) < pmin);
   if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
     bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
     cuda_finalize();
+    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+      pmin *= 2;
+      ld_nstep++;
+    }
+    if(pmin_1 < pmin) pmin = pmin_1;
+#ifndef _WIN32
+    fprintf(stderr, "This program will work by the time pmin == %lu.\n", pmin);
+#endif
     bexit(ERR_INVALID_PARAM);
+  }
+#ifdef SEARCH_TWIN
+  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -.
+  ld_nstep--;
+#endif
+  // Use the 32-step algorithm where useful.
+  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
+    if(ld_nstep != 32) printf("nstep changed to 32\n");
+    ld_nstep = 32;
+  }
+  // Use the 22-step algorithm where useful.
+  else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
+    if(ld_nstep != 22) printf("nstep changed to 22\n");
+    ld_nstep = 22;
+  } else {
+    printf("Didn't change nstep from %u\n", ld_nstep);
   }
   // Set the constants.
   //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
@@ -292,11 +324,27 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
+  if(ld_nstep == 32) ld_kernel_nstep /= 2;
+  else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
+  // Increase the step size for Fermis, to reduce memory bandwidth,
+  // and because they have more threads running per multiprocessor.
+  if(ccapability >= 2) ld_kernel_nstep *= 3;
+  // But shrink it to give at least four big N sections.
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
+  else if(ld_nstep == 32) i = 2;
+  else i = 1;
+  while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
+  
   // Finally, make sure it's a multiple of ld_nstep!!!
-  ld_kernel_nstep *= ld_nstep;
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
+  else {
+    ld_kernel_nstep *= ld_nstep;
+    // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
+    if(ld_nstep == 32) ld_kernel_nstep *= 2;
+  }
 
   cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
@@ -306,6 +354,40 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   cudaMemcpyToSymbol(d_nstep, &ld_nstep, sizeof(ld_nstep));
   i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
   cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
+
+  // Initialize n_subsection_start
+  // In slot 0 we insert nmax, so I'll refer to the bits as 1-8 to avoid confusion.
+  // Bit 1 is the highest part.  Usually bit 8 is the lowest, but sometimes it's a lower bit.
+  n_subsection_start[8] = nmin;
+  {
+    uint64_t test_n = nmin, next_n;
+    int j;
+    for(j=7; j >= 0; j--) {
+      // Divide the range into 8 sub-ranges of N's.
+      next_n = nmin + ((nmax - nmin + 8)/8)*(8-j);
+      // Pretty inefficient, but no more so than one kernel call loop.
+      while(test_n < next_n) test_n += ld_kernel_nstep;
+      n_subsection_start[j] = test_n;
+      // If test_n wasn't changed at all, shrink the range.
+      // Horribly inefficient at O(n^2), but n == 9.
+      if(test_n == n_subsection_start[j+1]) {
+        first_n_subsection--;
+        for(i=j; i < 8; i++)
+          n_subsection_start[i] = n_subsection_start[i+1];
+      }
+    }
+  }
+  // Make sure bit 0 is the highest.
+  if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
+  n_subsection_start[0] = nmax;
+/*
+  printf("Listing N subsections created:\n");
+  for(i=0; &n_subsection_start[i] != first_n_subsection; i++)
+    printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+  printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+*/
+  cudaStreamCreate(&stream);
+  checkCUDAErr("cudaStreamCreate");
 
   return cthread_count;
 }
@@ -457,13 +539,17 @@ __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
 __device__ uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
   uint64_t rcx;
 
-  // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
-  //rcx = 0;
-  //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
-  //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx = (rax!=0)?1:0;
+  // Akruppa's way, Compute T=a; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+  //if(rax != 0) {
+    // Most of the time.
+    rax = __umul64hi(rax, N) + 1;
+  //} else {
+    // I believe this is impossible, here, as it would lead to returning 0, which is impossible.
+    //rax = __umul64hi(rax, N);
+  //}
+    
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = __umul64hi(rax, N) + rcx;
+  //rax = __umul64hi(rax, N) + rcx;
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
@@ -497,7 +583,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   uint64_t rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns (mod 2^64).
   rcx = a >> d_nstep;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
@@ -523,6 +609,25 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   return rax;
 }
 
+// Same function, specifically designed for 32-bit shift.
+// (And to not clobber rax.)
+#define SHIFTMOD_REDCX(NSTEP) \
+__device__ uint64_t shiftmod_REDC##NSTEP (const uint64_t a, \
+    const uint64_t N, uint64_t rax) \
+{ \
+  uint64_t rcx; \
+  rax <<= (64-NSTEP); \
+  rcx = a >> NSTEP; \
+  rcx += (rax!=0)?1:0; \
+  rax = __umul64hi(rax, N) + rcx; \
+  rcx = rax - N; \
+  rax = (rax>N)?rcx:rax; \
+  return rax; \
+}
+SHIFTMOD_REDCX(21)
+SHIFTMOD_REDCX(32)
+SHIFTMOD_REDCX(42)
+
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 __device__ uint64_t
 invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
@@ -547,52 +652,354 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 #endif
 
   // Convert back to standard.
-  //r = mod_REDC (r, N, Ns);
+  r = mod_REDC (r, N, Ns);
 
   return r;
 }
 
 // Device-local function to iterate over some N's.
 // To avoid register pressure, clobbers i, and changes all non-const arguments.
+
+#ifdef SEARCH_TWIN
+#ifdef _DEVICEEMU
+#define TWIN_PRINT_NEG //fprintf(stderr, "%s%lu | %u*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, (unsigned int)kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#else
+#define TWIN_PRINT_NEG
+#endif
+// Select the even one here, so as to use the zero count and shift.
+// The other side (whether positive or negative) is odd then, with no zeroes on the right.
+#define TWIN_CHOOSE_EVEN_K0 kpos = (((unsigned int)k0) & 1)?(my_P - k0):k0;
+//#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#define TWIN_CHOOSE_EVEN kpos = (((unsigned int)kpos) & 1)?(my_P - kpos):kpos;
+// No zeroes on the right here.
+// Small kmax means testing the low and high bits of kpos separately.
+#define TWIN_TEST_NEG_SM \
+    kpos = my_P - kpos; \
+    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {\
+      TWIN_PRINT_NEG \
+      if(kpos >= d_kmin && n < d_nmax) my_factor_found |= 1; \
+    }
+#else
+#define TWIN_CHOOSE_EVEN_K0 kpos = k0;
+#define TWIN_CHOOSE_EVEN
+#define TWIN_TEST_NEG_SM
+#endif
+
+#ifdef _DEVICEEMU
+#define PRINT_FACTOR_FOUND2(STAGE) //printf(STAGE "%lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#define PRINT_FACTOR_FOUND(STAGE) PRINT_FACTOR_FOUND2(STAGE)
+#else
+#define PRINT_FACTOR_FOUND(STAGE)
+#endif
+
+// Count trailing zeros of kpos and store that count in i.
+//i = __ffsll(kpos)-1;
+#define CTZLL_KPOS \
+    i = (unsigned int)kpos; \
+    if(i != 0) { \
+      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f; \
+    } else { \
+      i = (unsigned int)(kpos>>32); \
+      i=63 - __clz (i & -i); \
+    }
+
+// Test for a factor by shifting by the result of CTZLL_KPOS
+// Small kmax means testing the low and high bits of kpos separately.
+// STAGE is just a string printed when printing the status while debugging.
+#define TEST_SHIFT_SMALL_KMAX(STAGE) \
+    if ((((unsigned int)(kpos>>32))>>i) == 0) \
+      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) { \
+        PRINT_FACTOR_FOUND(STAGE) \
+        if((kpos>>i) >= d_kmin && i < d_nstep && n+i < l_nmax) my_factor_found |= 1; \
+      }
+
 __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos;
+/*#ifdef SEARCH_TWIN
+  uint64_t kneg;
+#endif*/
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    CTZLL_KPOS
+
+    if ((kpos >> i) <= d_kmax) {
+#ifdef _DEVICEEMU
+      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      if((kpos >> i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
+    }
+/*
+#ifdef SEARCH_TWIN
+    kpos = my_P - kpos;
+
+    if (kpos <= d_kmax) {
+#ifdef _DEVICEEMU
+      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#endif
+      // Just flag this if kpos <= d_kmax.
+      if(kpos >= d_kmin) my_factor_found |= 1;
+    }
+#endif
+ */   
+    // Proceed to the K for the next N.
+    // kpos is destroyed, just to keep the register count down.
+    // Despite the Montgomery step, this isn't really in Montgomery form.
+    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
+    kpos = k0 * Ps;
+    n += d_nstep;   // Calculate n here so the next instruction can run in parallel on GF104.
+    k0 = shiftmod_REDC(k0, my_P, kpos);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// Small kmax means testing the low and high bits of kpos separately.
+__device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    CTZLL_KPOS
+
+    TEST_SHIFT_SMALL_KMAX("")
+
+    // Proceed to the K for the next N.
+    // kpos is destroyed, just to keep the register count down.
+    // Despite the Montgomery step, this isn't really in Montgomery form.
+    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
+    kpos = k0 * Ps;
+    n += d_nstep;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// This version works only for nstep (== d_mont_nstep) == 32
+__device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
     unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
   uint64_t kpos, kPs;
   unsigned int l_nmax = n + d_kernel_nstep;
   if(l_nmax > d_nmax) l_nmax = d_nmax;
 
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
 #endif
   do { // Remaining steps are all of equal size nstep
-    // Get K from the Montgomery form.
-    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 1/2: ")
+
+    // Skip 32 N's.
     kPs = k0 * Ps;
-    kpos = onemod_REDC(my_P, kPs);
-    //i = __ffsll(kpos)-1;
-    i = (unsigned int)kpos;
-    if(i != 0) {
-      i=(__float_as_int(__uint2float_rz(i & -i))>>23)-0x7f;
-    } else {
-      i = (unsigned int)(kpos>>32);
-      i=63 - __clz (i & -i);
+    n += 32;
+    kpos = shiftmod_REDC32(k0, my_P, kPs);
+    
+    // Test again here.
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 2/2: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    n += 32;
+    k0 = onemod_REDC(my_P, kPs);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
+// Same thing, but this version works only for nstep == 22
+__device__ void d_check_some_ns_22(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 1/3: ")
+
+    // Skip 21 N's.
+    kPs = k0 * Ps;
+    n += 21;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 2/3: ")
+
+    // Skip 21 more N's.
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    CTZLL_KPOS
+    TEST_SHIFT_SMALL_KMAX("part 3/3: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    n += 22;
+    k0 = onemod_REDC(my_P, kPs);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
+// *** Fermi check_some_ns ***
+// Same as functions above, but use a different method to check for a factor.
+
+// FERMI_TEST_SMALL_KMAX uses the "alternate algorithm" from the CPU version to pre-test for factors.
+#define TEST_SHIFT_SMALL_KMAX2(STAGE) TEST_SHIFT_SMALL_KMAX(STAGE)
+#define FERMI_TEST_SMALL_KMAX(STAGE) \
+    i = (unsigned int)kpos; \
+    if(i != 0) { \
+      i=i & -i; \
+      if(__umulhi((unsigned int)d_kmax, i) >= ((unsigned int)(kpos>>32))) { \
+        i=(__float_as_int(__uint2float_rz(i))>>23)-0x7f; \
+        TEST_SHIFT_SMALL_KMAX2("Fermi " STAGE) \
+      } \
+    } else { \
+      i = (unsigned int)(kpos>>32); \
+      i=63 - __clz (i & -i); \
+      TEST_SHIFT_SMALL_KMAX2("Fermi rare case " STAGE) \
     }
 
-    kpos >>= i;
-    if (kpos <= d_kmax) {
+__device__ void d_check_some_ns_small_kmax_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
 #ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%u | %u*2^%u+1 (P[%d])\n", bmprefix(), (unsigned int)my_P, (unsigned int)kpos, n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
 #endif
-      // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found = 1;
-    }
+  do {
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    FERMI_TEST_SMALL_KMAX("")
 
     // Proceed to the K for the next N.
-    // kPs is destroyed, just to keep the register count down.
-    k0 = shiftmod_REDC(k0, my_P, kPs);
+    // kpos is destroyed, just to keep the register count down.
+    // Despite the Montgomery step, this isn't really in Montgomery form.
+    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
+    kpos = k0 * Ps;
     n += d_nstep;
-  } while (n < l_nmax);
+    k0 = shiftmod_REDC(k0, my_P, kpos);
+  } while(n < l_nmax);
 #ifdef _DEVICEEMU
-  if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// This version works only for nstep (== d_mont_nstep) == 32
+__device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    FERMI_TEST_SMALL_KMAX("part 1/2: ")
+
+    // Skip 32 N's.
+    kPs = k0 * Ps;
+    n += 32;
+    kpos = shiftmod_REDC32(k0, my_P, kPs);
+    
+    // Test again here.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 2/2: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    n += 32;
+    k0 = onemod_REDC(my_P, kPs);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
+// Same thing, but this version works only for nstep == 22
+__device__ void d_check_some_ns_22_fermi(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    FERMI_TEST_SMALL_KMAX("part 1/3: ")
+
+    // Skip 21 N's.
+    kPs = k0 * Ps;
+    n += 21;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 2/3: ")
+
+    // Skip 21 more N's.
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    n += 21;
+    
+    // Test again here, but not neg_sm because that's covered by the last test.
+    TWIN_CHOOSE_EVEN
+    FERMI_TEST_SMALL_KMAX("part 3/3: ")
+
+    // Increase k0 the full 64 N's, using the same kPs.
+    n += 22;
+    k0 = onemod_REDC(my_P, kPs);
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
 #endif
 }
 
@@ -610,7 +1017,7 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
   // Better get this done before the first mulmod.
   my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
 
-  // Calculate k0, in Montgomery form.
+  // Calculate k0, not in Montgomery form.
   k0 = invpowmod_REDClr(my_P, my_Ps);
 
   //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, my_Ps);
@@ -626,30 +1033,68 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
     Ps[i] = my_Ps;
     K[i] = k0;
   }
+#ifdef SEARCH_TWIN
+  // Search the non-even value one time only.
+  if((((unsigned int)k0) & 1) == 0) k0 = my_P - k0;
+  if (((unsigned int)(k0>>32)) == 0 && ((unsigned int)k0) <= ((unsigned int)d_kmax)) {
+    TWIN_PRINT_NEG
+      if(k0 >= d_kmin) factor_found_arr[i] = 1;
+  }
+#endif
 }
 
 // Continue checking N's.
-__global__ void d_check_more_ns(const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr) {
-  unsigned int n = N;
-  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  uint64_t k0 = K[i];
-  unsigned char my_factor_found = factor_found_arr[i];
-
-  d_check_some_ns(P[i], Ps[i], k0, n, my_factor_found, i);
-
-  i = blockIdx.x * BLOCKSIZE + threadIdx.x;
-  factor_found_arr[i] = my_factor_found;
-  if(n < d_nmax) {
-    K[i] = k0;
-  }
+#define CHECK_MORE_NS_KERNEL(TYPE) \
+__global__ void d_check_more_ns##TYPE (const uint64_t *P, const uint64_t *Ps, uint64_t *K, unsigned int N, unsigned char *factor_found_arr, unsigned int shift) { \
+  unsigned int n = N; \
+  unsigned int i = blockIdx.x * BLOCKSIZE + threadIdx.x; \
+  uint64_t k0 = K[i]; \
+  unsigned char my_factor_found = factor_found_arr[i]; \
+ \
+  if(shift == 1) my_factor_found <<= 1; \
+ \
+  d_check_some_ns##TYPE (P[i], Ps[i], k0, n, my_factor_found, i); \
+ \
+  i = blockIdx.x * BLOCKSIZE + threadIdx.x; \
+  factor_found_arr[i] = my_factor_found; \
+  if(n < d_nmax) { \
+    K[i] = k0; \
+  } \
 }
+
+CHECK_MORE_NS_KERNEL()
+// Continue checking N's for small kmax.
+CHECK_MORE_NS_KERNEL(_small_kmax)
+// Continue checking N's for nstep == 32
+CHECK_MORE_NS_KERNEL(_32)
+// Continue checking N's for nstep == 22
+CHECK_MORE_NS_KERNEL(_22)
+// Fermi versions of the above:
+// Continue checking N's for small kmax.
+CHECK_MORE_NS_KERNEL(_small_kmax_fermi)
+// Continue checking N's for nstep == 32
+CHECK_MORE_NS_KERNEL(_32_fermi)
+// Continue checking N's for nstep == 22
+CHECK_MORE_NS_KERNEL(_22_fermi)
 
 // *** Host Kernel-calling functions ***
 
+#define CALL_LOOP(KERNEL) \
+      for(n = nmin; n < nmax; n += ld_kernel_nstep) { \
+        if(n >= *this_n_subsection) { \
+          if(n > *this_n_subsection) fprintf(stderr, #KERNEL " Warning: N, %u, > expected N, %u\n", n, *this_n_subsection); \
+          shift = 1; \
+          this_n_subsection--; \
+        } else shift = 0; \
+        KERNEL <<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift); \
+        checkCUDAErr("kernel " #KERNEL "invocation"); \
+      }
 // Pass the arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   const unsigned int cblockcount = cthread_count/BLOCKSIZE;
   unsigned int n;
+  unsigned int shift = 0;
+  unsigned int *this_n_subsection = first_n_subsection;
   // timing variables:
 
   // Pass P.
@@ -658,9 +1103,6 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  cudaStreamCreate(&stream);
-  checkCUDAErr("cudaStreamCreate");
-
   cudaEventCreate(&stop);
   checkCUDAErr("cudaEventCreate");
 
@@ -670,9 +1112,36 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   bmsg("Main kernel successful...\n");
 #endif
   // Continue checking until nmax is reached.
-  for(n = nmin; n < nmax; n += ld_kernel_nstep) {
-    d_check_more_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found);
-    checkCUDAErr("kernel invocation");
+  if(kmax < (((uint64_t)1)<<31)
+//#ifndef SEARCH_TWIN
+      // Also make sure it's worthwhile to make a full shift conditional.
+      // This is worth it 60% of the time on Fermi (and takes an extra cycle 40% of the time) at 1<<46.
+      // But I have extra tricks for Fermi. :)
+      && (ld_nstep == 32 || P[0] > (((uint64_t)1)<<43))
+//#endif
+        )
+  {
+    if(ccapability >= 2) {
+      // Use a Fermi kernel.
+      if(ld_nstep == 22) {
+        CALL_LOOP(d_check_more_ns_22_fermi)
+      } else if(ld_nstep == 32) {
+        CALL_LOOP(d_check_more_ns_32_fermi)
+      } else {
+        CALL_LOOP(d_check_more_ns_small_kmax_fermi)
+      }
+    } else {
+      if(ld_nstep == 22) {
+        CALL_LOOP(d_check_more_ns_22)
+      } else if(ld_nstep == 32) {
+        CALL_LOOP(d_check_more_ns_32)
+      } else {
+        CALL_LOOP(d_check_more_ns_small_kmax)
+      }
+    }
+    //#endif
+  } else {
+    CALL_LOOP(d_check_more_ns)
   }
 }
 
@@ -690,6 +1159,8 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
     }
   }
   checkCUDAErr("waiting for factors found");
+  cudaEventDestroy(stop);
+  checkCUDAErr("cudaEventDestroy");
 
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
