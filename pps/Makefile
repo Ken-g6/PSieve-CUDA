@@ -77,7 +77,7 @@ non-boinc: $(NON_BOINC_BINS) $(TPS_BINS)
 boinc: $(BOINC_BINS) $(TPS_BOINC_BINS)
 
 clean:
-	-rm *.o ../*.o $(BINS) $(TPS_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
+	-rm *.o ../*.o $(BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
 
 $(APPNAME)-x86-linux: $(OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)
