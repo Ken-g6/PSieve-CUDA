@@ -54,26 +54,24 @@
 #define KOFFSET 1
 #endif
 
-#ifndef __x86_64__
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
 // MPOS = result (32-bit)
 // KPOS = input (64-bit; evaluated twice!)
 // ID = a unique ID string.
-#ifdef __i386__
+#if !defined(__x86_64__) && defined(__i386__) && defined(__GNUC__)
 #define BSFQ(MPOS,KPOS,ID)          asm volatile \
             ( 		"bsfl	%[k0l], %[pos]	\n" \
-                "	jnz	bsflok"ID"		\n" \
+                "	jnz	bsflok" #ID "		\n" \
                 "	bsfl	%[k0h], %[pos]	\n" \
                 "	addl	$32, %[pos]	\n" \
-                "bsflok"ID":" \
+                "bsflok" #ID ":" \
                 : [pos] "=r" (MPOS) \
                 : [k0l] "rm" ((unsigned int)(KPOS)), \
                 [k0h] "rm" ((unsigned int)((KPOS) >> 32)) \
                 : "cc" )
 #else
 // If anyone wants to compile on some non-x86 platform somehow...
-#define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS);
-#endif
+#define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS)
 #endif
 
 #define FORMAT_NEWPGEN 1
@@ -105,6 +103,8 @@ static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
 static uint64_t r0arr[9];
 static int bbitsarr[9];
+static unsigned int kstep = KSTEP;
+static unsigned int koffset = KOFFSET;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -152,9 +152,9 @@ static void __attribute__((noinline))
 #endif
 test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 {
-  uint64_t b = k/KSTEP;
+  uint64_t b = k/kstep;
 
-  if((k == KSTEP*b+KOFFSET) && n >= nmin && n < nmax) { // k is odd.
+  if((k == kstep*b+koffset) && n >= nmin && n < nmax) { // k is odd.
     if (bitmap == NULL) {
       unsigned int khigh = (unsigned int)(k>>32);
       uint64_t mod31 = (uint64_t)1;
@@ -322,8 +322,8 @@ static FILE* scan_input_file(const char *fn)
 #ifdef SEARCH_TWIN
   if (file_format == FORMAT_ABCD)
   {
-    k0 = KSTEP*k0+KOFFSET;
-    k1 = KSTEP*k1+KOFFSET;
+    k0 = kstep*k0+koffset;
+    k1 = kstep*k1+koffset;
   }
 #endif
   printf("Found K's from %"SCNu64" to %"SCNu64".\n", k0, k1);
@@ -378,14 +378,14 @@ static void read_newpgen_file(const char *fn, FILE* file)
   while (fscanf(file," %"SCNu64" %u",&k,&n) == 2)
   {
     line++;
-    if ((k%KSTEP) != KOFFSET)
+    if ((k%kstep) != koffset)
     {
       fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
       bexit(ERR_SCANF);
     }
     if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
     {
-      uint64_t bit = k/KSTEP-b0;
+      uint64_t bit = k/kstep-b0;
       bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
       count++; /* TODO: Don't count duplicates */
     }
@@ -441,7 +441,7 @@ static void read_abcd_file(const char *fn, FILE *file)
 #ifdef SEARCH_TWIN
     uint64_t bit = k-b0;
 #else
-    uint64_t bit = (k-kmin)/KSTEP;
+    uint64_t bit = (k-kmin)/kstep;
 #endif
     unsigned int bo8 = (unsigned int)(bit/8);
     unsigned int bm8 = (unsigned int)(1 << bit%8);
@@ -585,6 +585,17 @@ int app_parse_option(int opt, char *arg, const char *source)
     case 'd':
       status = parse_uint((unsigned int *)(&device_opt),arg,0,INT32_MAX);
       break;
+      
+    case 'M':
+      // Change K's modulus.
+      status = parse_uint(&kstep,arg,1,(1U<<31)-1);
+      if(koffset >= kstep) koffset = kstep/2;
+      break;
+
+    case 's':
+      // Change K's modoffset.
+      status = parse_uint(&koffset,arg,1,(1U<<31)-1);
+      break;
 
 #ifndef SEARCH_TWIN
     case 'R':
@@ -605,6 +616,9 @@ void app_help(void)
   printf("-f --factors=FILE  Write factors to FILE (default `%s')\n",
          FACTORS_FILENAME_DEFAULT);
   printf("-i --input=FILE    Read initial sieve from FILE\n");
+  printf("-M --modulus       (Default %u\n", KSTEP);
+  printf("-s --modshift      Print only k's == s mod M. Default %u, or M/2\n",
+      KOFFSET);
   printf("-k --kmin=K0\n");
   printf("-K --kmax=K1       Sieve for primes k*2^n+/-1 with K0 <= k <= K1\n");
   printf("-m --mthreads=M    Force M threads or blocks/multiprocessor.\n");
@@ -682,10 +696,10 @@ void app_init(void)
     bexit(ERR_INVALID_PARAM);
   }
 
-  b0 = kmin/KSTEP;
-  b1 = kmax/KSTEP;
-  kmin = b0*KSTEP+KOFFSET;
-  kmax = b1*KSTEP+KOFFSET;
+  b0 = kmin/kstep;
+  b1 = kmax/kstep;
+  kmin = b0*kstep+koffset;
+  kmax = b1*kstep+koffset;
 
   for (nstep = 1; (kmax << nstep) < pmin; nstep++)
     ;
@@ -796,7 +810,7 @@ unsigned int app_thread_init(int th)
 /*  Multiplies for REDC code  */
 
 #if defined(GCC) && defined(__x86_64__)
-static uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
 {
   uint64_t t1, t2;
   __asm__
@@ -808,7 +822,7 @@ static uint64_t __umul64hi(uint64_t a, uint64_t b)
 }
 #else
 #if defined(GCC) && !defined(__x86_64__)
-static unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   unsigned int t1, t2;
   __asm__
@@ -818,28 +832,44 @@ static unsigned int __umulhi(unsigned int a, unsigned int b)
     : "cc");
   return t2;
 }
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  unsigned int t1, t2;
+  __asm__
+  ( "mull %3\n\t"
+    : "=a" (t1), "=d" (t2)
+    : "0" (a), "rm" (b)
+    : "cc");
+  return (((uint64_t)t2)<<32)+t1;
+}
 #else
-static unsigned int __umulhi(unsigned int a, unsigned int b)
+static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   uint64_t c = (uint64_t)a * (uint64_t)b;
 
   return (unsigned int)(c >> 32);
 }
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  return (uint64_t)a * (uint64_t)b;
+}
 #endif
 
-static uint64_t __umul64hi(uint64_t a, uint64_t b)
+static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
 {
-  unsigned int           a_lo = (unsigned int)a;
-  uint64_t a_hi = a >> 32;
-  unsigned int           b_lo = (unsigned int)b;
-  uint64_t b_hi = b >> 32;
-  uint64_t m1 = a_lo * b_hi;
-  uint64_t m2 = a_hi * b_lo;
-  unsigned int           carry;
+  const unsigned int a_lo = (unsigned int)a;
+  const unsigned int a_hi = (unsigned int)(a >> 32);
+  const unsigned int b_lo = (unsigned int)b;
+  const unsigned int b_hi = (unsigned int)(b >> 32);
+  uint64_t m1 = __umul64(a_lo, b_hi);
+  uint64_t m2 = __umul64(a_hi, b_lo);
+  //unsigned int           carry;
 
-  carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
+  m1 += m2 + __umulhi(a_lo, b_lo);
+  //carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
 
-  return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
+  //return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
+  return __umul64(a_hi, b_hi) + (m1 >> 32);
 }
 #endif
 
@@ -937,7 +967,7 @@ static uint64_t shiftmod_REDC (const uint64_t a,
   return rax;
 }
 
-// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no more than one longmod!
+// Hybrid powmod, sidestepping several loops and possible mispredicts, and with no longmod!
 /* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
 static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const unsigned int l_nmin, uint64_t r, int bbits) {
   // Now work through the other bits of nmin.
@@ -996,6 +1026,14 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
     //bexit(ERR_NEG);
   } */
+#ifdef SEARCH_TWIN
+    // Select the first odd one.  All others are tested by overlap.
+    kpos = (k0&1)?k0:(my_P - k0);
+    if (kpos <= kmax && kpos >= kmin) {
+      cands_found++;
+      test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
+    }
+#endif
 
 #ifndef SEARCH_TWIN
   if(search_proth == 1) k0 = my_P-k0;
@@ -1004,35 +1042,29 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
   do { // Remaining steps are all of equal size nstep
     // Get K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = k0 * Ps;
+    kPs = __umul64(k0, Ps);
     kpos = k0;
 #ifdef SEARCH_TWIN
-    kneg = my_P - kpos;
+    // Select the even one.
+    kpos = (kpos&1)?(my_P - kpos):kpos;
 #endif
     //i = __ffsll(kpos)-1;
-    i = __builtin_ctzll(kpos);
-    kpos >>= i;
+    //i = __builtin_ctzll(kpos);
+    BSFQ(i, kpos, 1);
 
-    if (kpos <= kmax && kpos >= kmin && i < ld_nstep) {
+#ifdef SEARCH_TWIN
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
+#else
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
+#endif
       cands_found++;
       //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
-        test_factor(my_P,kpos,n+i,-1);
+        test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
-        test_factor(my_P,kpos,n+i,search_proth);
+        test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
     }
-
-#ifdef SEARCH_TWIN
-    i = __builtin_ctzll(kneg);
-    kneg >>= i;
-
-    if (kneg <= kmax && kneg >= kmin) {
-      cands_found++;
-      if (i < ld_nstep)
-        test_factor(my_P,kneg,n+i,+1);
-    }
-#endif
 
     // Proceed to the K for the next N.
     k0 = shiftmod_REDC(k0, my_P, kPs);

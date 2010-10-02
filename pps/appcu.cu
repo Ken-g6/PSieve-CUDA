@@ -283,6 +283,10 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 #endif
     bexit(ERR_INVALID_PARAM);
   }
+#ifdef SEARCH_TWIN
+  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -.
+  ld_nstep--;
+#endif
   // Use the 32-step algorithm where useful.
   if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
@@ -325,6 +329,15 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
+  // Increase the step size for Fermis, to reduce memory bandwidth,
+  // and because they have more threads running per multiprocessor.
+  if(ccapability >= 2) ld_kernel_nstep *= 3;
+  // But shrink it to give at least four big N sections.
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
+  else if(ld_nstep == 32) i = 2;
+  else i = 1;
+  while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
+  
   // Finally, make sure it's a multiple of ld_nstep!!!
   if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
   else {
@@ -526,13 +539,17 @@ __device__ uint64_t mulmod_REDC (const uint64_t a, const uint64_t b,
 __device__ uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
   uint64_t rcx;
 
-  // Akruppa's way, Compute T=a*b; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
-  //rcx = 0;
-  //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
-  //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx = (rax!=0)?1:0;
+  // Akruppa's way, Compute T=a; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
+  //if(rax != 0) {
+    // Most of the time.
+    rax = __umul64hi(rax, N) + 1;
+  //} else {
+    // I believe this is impossible, here, as it would lead to returning 0, which is impossible.
+    //rax = __umul64hi(rax, N);
+  //}
+    
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = __umul64hi(rax, N) + rcx;
+  //rax = __umul64hi(rax, N) + rcx;
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
@@ -566,7 +583,7 @@ __device__ uint64_t shiftmod_REDC (const uint64_t a,
   uint64_t rcx;
 
   //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns (mod 2^64).
   rcx = a >> d_nstep;
   //"movq %%rdx,%%rcx\n\t"	// rcx = Th			Cycle  8
   //"imulq %[Ns], %%rax\n\t"  // rax = (T*Ns) mod 2^64 = m 	Cycles 8-12 
@@ -651,7 +668,9 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 #endif
 // Select the even one here, so as to use the zero count and shift.
 // The other side (whether positive or negative) is odd then, with no zeroes on the right.
-#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#define TWIN_CHOOSE_EVEN_K0 kpos = (((unsigned int)k0) & 1)?(my_P - k0):k0;
+//#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#define TWIN_CHOOSE_EVEN kpos = (((unsigned int)kpos) & 1)?(my_P - kpos):kpos;
 // No zeroes on the right here.
 // Small kmax means testing the low and high bits of kpos separately.
 #define TWIN_TEST_NEG_SM \
@@ -661,6 +680,7 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
       if(kpos >= d_kmin && n < d_nmax) my_factor_found |= 1; \
     }
 #else
+#define TWIN_CHOOSE_EVEN_K0 kpos = k0;
 #define TWIN_CHOOSE_EVEN
 #define TWIN_TEST_NEG_SM
 #endif
@@ -708,8 +728,7 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     CTZLL_KPOS
 
     if ((kpos >> i) <= d_kmax) {
@@ -719,6 +738,7 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
       // Just flag this if kpos <= d_kmax.
       if((kpos >> i) >= d_kmin && i < d_nstep) my_factor_found |= 1;
     }
+/*
 #ifdef SEARCH_TWIN
     kpos = my_P - kpos;
 
@@ -730,14 +750,14 @@ __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t
       if(kpos >= d_kmin) my_factor_found |= 1;
     }
 #endif
-    
+ */   
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
     // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
     kpos = k0 * Ps;
+    n += d_nstep;   // Calculate n here so the next instruction can run in parallel on GF104.
     k0 = shiftmod_REDC(k0, my_P, kpos);
-    n += d_nstep;
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
@@ -759,21 +779,18 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     CTZLL_KPOS
 
     TEST_SHIFT_SMALL_KMAX("")
-
-    TWIN_TEST_NEG_SM
 
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
     // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
     kpos = k0 * Ps;
-    k0 = shiftmod_REDC(k0, my_P, kpos);
     n += d_nstep;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
@@ -794,26 +811,23 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     CTZLL_KPOS
     TEST_SHIFT_SMALL_KMAX("part 1/2: ")
-    TWIN_TEST_NEG_SM
 
     // Skip 32 N's.
     kPs = k0 * Ps;
-    kpos = shiftmod_REDC32(k0, my_P, kPs);
     n += 32;
+    kpos = shiftmod_REDC32(k0, my_P, kPs);
     
     // Test again here.
     TWIN_CHOOSE_EVEN
     CTZLL_KPOS
     TEST_SHIFT_SMALL_KMAX("part 2/2: ")
-    TWIN_TEST_NEG_SM
 
     // Increase k0 the full 64 N's, using the same kPs.
-    k0 = onemod_REDC(my_P, kPs);
     n += 32;
+    k0 = onemod_REDC(my_P, kPs);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
@@ -833,16 +847,14 @@ __device__ void d_check_some_ns_22(const uint64_t my_P, const uint64_t Ps, uint6
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     CTZLL_KPOS
     TEST_SHIFT_SMALL_KMAX("part 1/3: ")
-    TWIN_TEST_NEG_SM
 
     // Skip 21 N's.
     kPs = k0 * Ps;
-    kpos = shiftmod_REDC21(k0, my_P, kPs);
     n += 21;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
     
     // Test again here, but not neg_sm because that's covered by the last test.
     TWIN_CHOOSE_EVEN
@@ -859,8 +871,8 @@ __device__ void d_check_some_ns_22(const uint64_t my_P, const uint64_t Ps, uint6
     TEST_SHIFT_SMALL_KMAX("part 3/3: ")
 
     // Increase k0 the full 64 N's, using the same kPs.
-    k0 = onemod_REDC(my_P, kPs);
     n += 22;
+    k0 = onemod_REDC(my_P, kPs);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
@@ -898,18 +910,16 @@ __device__ void d_check_some_ns_small_kmax_fermi(const uint64_t my_P, const uint
   do {
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("")
-    TWIN_TEST_NEG_SM
 
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
     // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
     kpos = k0 * Ps;
-    k0 = shiftmod_REDC(k0, my_P, kpos);
     n += d_nstep;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
@@ -930,24 +940,21 @@ __device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps,
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("part 1/2: ")
-    TWIN_TEST_NEG_SM
 
     // Skip 32 N's.
     kPs = k0 * Ps;
-    kpos = shiftmod_REDC32(k0, my_P, kPs);
     n += 32;
+    kpos = shiftmod_REDC32(k0, my_P, kPs);
     
     // Test again here.
     TWIN_CHOOSE_EVEN
     FERMI_TEST_SMALL_KMAX("part 2/2: ")
-    TWIN_TEST_NEG_SM
 
     // Increase k0 the full 64 N's, using the same kPs.
-    k0 = onemod_REDC(my_P, kPs);
     n += 32;
+    k0 = onemod_REDC(my_P, kPs);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
@@ -967,15 +974,13 @@ __device__ void d_check_some_ns_22_fermi(const uint64_t my_P, const uint64_t Ps,
   do { // Remaining steps are all of equal size nstep
     // Montgomery form doesn't matter; it's just k*2^64 mod P.
     // Get a copy of K, which isn't in Montgomery form.
-    kpos = k0;
-    TWIN_CHOOSE_EVEN
+    TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("part 1/3: ")
-    TWIN_TEST_NEG_SM
 
     // Skip 21 N's.
     kPs = k0 * Ps;
-    kpos = shiftmod_REDC21(k0, my_P, kPs);
     n += 21;
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
     
     // Test again here, but not neg_sm because that's covered by the last test.
     TWIN_CHOOSE_EVEN
@@ -990,8 +995,8 @@ __device__ void d_check_some_ns_22_fermi(const uint64_t my_P, const uint64_t Ps,
     FERMI_TEST_SMALL_KMAX("part 3/3: ")
 
     // Increase k0 the full 64 N's, using the same kPs.
-    k0 = onemod_REDC(my_P, kPs);
     n += 22;
+    k0 = onemod_REDC(my_P, kPs);
   } while(n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
@@ -1028,6 +1033,14 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
     Ps[i] = my_Ps;
     K[i] = k0;
   }
+#ifdef SEARCH_TWIN
+  // Search the non-even value one time only.
+  if((((unsigned int)k0) & 1) == 0) k0 = my_P - k0;
+  if (((unsigned int)(k0>>32)) == 0 && ((unsigned int)k0) <= ((unsigned int)d_kmax)) {
+    TWIN_PRINT_NEG
+      if(k0 >= d_kmin) factor_found_arr[i] = 1;
+  }
+#endif
 }
 
 // Continue checking N's.

@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include "stdint.h"
 
-#define APP_VERSION "cuda-0.2.0"
+#define APP_VERSION "cuda-0.2.1"
 
 #ifdef SEARCH_TWIN
 #define APP_PREFIX "tp"
@@ -35,14 +35,19 @@
 
 #define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
 
-#ifdef SEARCH_TWIN
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:"
-#else
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:M:s:"
+
+// Add Riesel if not SEARCH_TWIN
+#ifndef SEARCH_TWIN
+#undef APP_SHORT_OPTS
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:M:s:R"
 #endif
+
 #define APP_LONG_OPTS \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
+  {"modulus",       required_argument, 0, 'M'}, \
+  {"modshift",      required_argument, 0, 's'}, \
   {"nmin",          required_argument, 0, 'n'}, \
   {"nmax",          required_argument, 0, 'N'}, \
   {"input",         required_argument, 0, 'i'}, \
