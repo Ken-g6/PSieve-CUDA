@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include "stdint.h"
 
-#define APP_VERSION "cuda-0.2.1"
+#define APP_VERSION "cuda-0.2.1a"
 
 #ifdef SEARCH_TWIN
 #define APP_PREFIX "tp"

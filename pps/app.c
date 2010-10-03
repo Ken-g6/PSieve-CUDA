@@ -863,13 +863,11 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
   const unsigned int b_hi = (unsigned int)(b >> 32);
   uint64_t m1 = __umul64(a_lo, b_hi);
   uint64_t m2 = __umul64(a_hi, b_lo);
-  //unsigned int           carry;
+  unsigned int           carry;
 
-  m1 += m2 + __umulhi(a_lo, b_lo);
-  //carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
+  carry = (((uint64_t)__umulhi(a_lo, b_lo)) + (unsigned int)m1 + (unsigned int)m2) >> 32;
 
-  //return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
-  return __umul64(a_hi, b_hi) + (m1 >> 32);
+  return __umul64(a_hi, b_hi) + (m1 >> 32) + (m2 >> 32) + carry;
 }
 #endif
 
