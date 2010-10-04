@@ -1161,6 +1161,7 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
   checkCUDAErr("waiting for factors found");
   cudaEventDestroy(stop);
   checkCUDAErr("cudaEventDestroy");
+  stop = NULL;
 
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");
