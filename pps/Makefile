@@ -43,7 +43,8 @@ CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
 # Uncomment to use device emulation:
 #DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
-CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS) #-D_DEVICEEMU
+# Uncomment -D_DEVICEEMU below to use ATI OpenCL device emulation.
+CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS) # -D_DEVICEEMU
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 CL_LINK = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86
@@ -68,7 +69,7 @@ BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-fil
 #nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 
 # Make-able targets:
-all: $(BINS) $(CL_BINS) $(TPS_BINS) $(TPS_BOINC_BINS)
+all: $(BINS) cl tps
 
 cl: appcl.h $(CL_BINS)
 
@@ -92,6 +93,8 @@ changes:
 
 # Binaries:
 tps: $(TPS_BINS) $(TPS_BOINC_BINS)
+	
+# $(CL_TPS_BINS) $(CL_TPS_BOINC_BINS)
 
 non-boinc: $(NON_BOINC_BINS) $(TPS_BINS)
 
@@ -118,6 +121,12 @@ $(APPNAME)-x86_64-linux: $(CUDA_OBJS64)
 $(APPNAME)-boinc-x86_64-linux: $(CUDA_BOINC_OBJS64)
 	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK64)
 
+$(TPS_APPNAME)-x86_64-linux: $(TPSOBJS64)
+	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
+
+$(TPS_APPNAME)-boinc-x86_64-linux: $(BOINC_TPSOBJS64)
+	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC64_LINK) -DSEARCH_TWIN
+
 $(CL_APPNAME)-x86-linux: $(CL_OBJS)
 	$(CXX) -m32 -o $@ $(CFLAGS) $^ $(CL_LINK) $(LINK)
 
@@ -129,12 +138,6 @@ $(CL_APPNAME)-x86_64-linux: $(CL_OBJS64)
 
 $(CL_APPNAME)-boinc-x86_64-linux: $(CL_BOINC_OBJS64)
 	$(CXX) -m64 -o $@ $(BOINC_CFLAGS) $^ $(CL_LINK64) $(BOINC_LINK64)
-
-$(TPS_APPNAME)-x86_64-linux: $(TPSOBJS64)
-	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
-
-$(TPS_APPNAME)-boinc-x86_64-linux: $(BOINC_TPSOBJS64)
-	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC64_LINK) -DSEARCH_TWIN
 
 # OBJS
 ../main.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h

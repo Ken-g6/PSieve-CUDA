@@ -78,6 +78,10 @@ static unsigned int ld_kernel_nstep;
 static size_t global_cthread_count[1];
 static cl_event comp_done_event;
 
+// Stores the N to start at for the given bit position in 
+unsigned int n_subsection_start[9];
+static unsigned int *first_n_subsection = &n_subsection_start[7];
+
 //static bool blocking_sync_ok=true;
 //const char *source;
 //globals for OpenCL
@@ -95,6 +99,9 @@ cl_program program;
 /* This program uses two kernels */
 cl_kernel  start_ns_kernel;
 cl_kernel  check_more_ns_kernel;
+
+// A getter for n_subsection_start.  Yes, in C!
+int get_n_subsection_start(int index) { return n_subsection_start[index]; }
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -398,28 +405,77 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // Double this if using ulong2.
   *cthread_count *= vecsize;
 
-  // N's to search each time a kernel is run:
-  ld_kernel_nstep = ITERATIONS_PER_KERNEL;
-  // Adjust for differing block sizes.
-  ld_kernel_nstep *= 384;
-  ld_kernel_nstep /= (*cthread_count/compute_units);
-  ld_kernel_nstep *= ld_nstep;
+  //assert((1ul << (64-nstep)) < pmin);
+  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
+    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+      pmin *= 2;
+      ld_nstep++;
+    }
+    if(pmin_1 < pmin) pmin = pmin_1;
+#ifdef _WIN32
+    fprintf(stderr, "This program will work by the time pmin == %I64u.\n", pmin);
+#else
+    fprintf(stderr, "This program will work by the time pmin == %llu.\n", pmin);
+#endif
+    bexit(ERR_INVALID_PARAM);
+  }
   if (ld_nstep > (nmax-nmin+1))
     ld_nstep = (nmax-nmin+1);
 
-  //assert((1ul << (64-nstep)) < pmin);
-  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
-    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
-    bexit(ERR_INVALID_PARAM);
+#ifdef SEARCH_TWIN
+  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -
+  ld_nstep--;
+#endif
+  // Use the 32-step algorithm where useful.
+  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
+    if(ld_nstep != 32) printf("nstep changed to 32\n");
+    ld_nstep = 32;
+  }
+  // Use the 22-step algorithm where useful.
+  else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
+    if(ld_nstep != 22) printf("nstep changed to 22\n");
+    ld_nstep = 22;
+  } else {
+    printf("Didn't change nstep from %u\n", ld_nstep);
+  }
+
+  // N's to search each time a kernel is run:
+  ld_kernel_nstep = ITERATIONS_PER_KERNEL;
+  if(ld_nstep == 32) ld_kernel_nstep /= 2;
+  else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
+  // Adjust for differing block sizes.
+  ld_kernel_nstep *= 384;
+  ld_kernel_nstep /= (*cthread_count/compute_units);
+  // But shrink it to give at least four big N sections.
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
+  else if(ld_nstep == 32) i = 2;
+  else i = 1;
+  while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
+  
+  // Finally, make sure it's a multiple of ld_nstep!!!
+  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
+  else {
+    ld_kernel_nstep *= ld_nstep;
+    // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
+    if(ld_nstep == 32) ld_kernel_nstep *= 2;
   }
   // Set the constants.
   //CL_MEMCPY_TO_SYMBOL(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
 
   // Prepare constants:
+#ifdef SEARCH_TWIN
+  nmin--;
+#endif
   ld_bbits = lg2(nmin);
   //assert(d_r0 <= 32);
   if(ld_bbits < 6) {
+#ifdef SEARCH_TWIN
+    fprintf(stderr, "%sError: nmin too small at %d (must be at least 65).\n", bmprefix(), nmin+1);
+#else
     fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+#endif
     bexit(ERR_INVALID_PARAM);
   }
   // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
@@ -450,6 +506,12 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // Vectorization (pass-thru):
   sprintf(defbuf, "#define VECSIZE %u\n", vecsize);
   source += defbuf;
+#ifdef SEARCH_TWIN
+  source += "#define SEARCH_TWIN\n";
+#endif
+#ifdef _DEVICEEMU
+  source += "#define _DEVICEEMU\n";
+#endif
   
   if(kmin < ((uint64_t)(1u<<31))) {
     //CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
@@ -462,9 +524,11 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     sprintf(defbuf, "#define D_KMAX ((%uu))\n", (unsigned int)kmax);
     source += defbuf;
   }
+#ifndef SEARCH_TWIN
   //CL_MEMCPY_TO_SYMBOL(d_search_proth, &i, sizeof(i));
   if(search_proth == 1)	// search_proth is 1 or -1, not 0.
     source += "#define D_SEARCH_PROTH 1\n";
+#endif
 
 
   /////////////////////////////////////////////////////////////////
@@ -597,6 +661,37 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   CL_SET_BUF_ARG(start_ns_kernel, d_factor_found);
   CL_SET_BUF_ARG(check_more_ns_kernel, d_factor_found);
 
+  // Initialize n_subsection_start
+  // In slot 0 we insert nmax, so I'll refer to the bits as 1-8 to avoid confusion.
+  // Bit 1 is the highest part.  Usually bit 8 is the lowest, but sometimes it's a lower bit.
+  n_subsection_start[8] = nmin;
+  {
+    uint64_t test_n = nmin, next_n;
+    int j;
+    for(j=7; j >= 0; j--) {
+      // Divide the range into 8 sub-ranges of N's.
+      next_n = nmin + ((nmax - nmin + 8)/8)*(8-j);
+      // Pretty inefficient, but no more so than one kernel call loop.
+      while(test_n < next_n) test_n += ld_kernel_nstep;
+      n_subsection_start[j] = test_n;
+      // If test_n wasn't changed at all, shrink the range.
+      // Horribly inefficient at O(n^2), but n == 9.
+      if(test_n == n_subsection_start[j+1]) {
+        first_n_subsection--;
+        for(int i=j; i < 8; i++)
+          n_subsection_start[i] = n_subsection_start[i+1];
+      }
+    }
+  }
+  // Make sure bit 0 is the highest.
+  if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
+  n_subsection_start[0] = nmax;
+/*
+  printf("Listing N subsections created:\n");
+  for(i=0; &n_subsection_start[i] != first_n_subsection; i++)
+    printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+  printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
+*/
   // Set the number of actual GPU threads to run.
   // If vectorized, divide by the vector size.
   global_cthread_count[0] = cthread_count / vecsize;
@@ -611,7 +706,8 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 // Pass the arguments to the CUDA device, run the code, and get the results.
 void check_ns(const uint64_t *P, const unsigned int cthread_count) {
   //const unsigned int cblockcount = cthread_count/BLOCKSIZE;
-  unsigned int n;
+  unsigned int n, shift, lastshift;
+  unsigned int *this_n_subsection = first_n_subsection;
   // timing variables:
 
   // Pass P.
@@ -650,12 +746,27 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
 #endif
+  lastshift = 2;  // Not 0 or 1.
   // Continue checking until nmax is reached.
   for(n = nmin; n < nmax; n += ld_kernel_nstep) {
     checkCUDAErr(clReleaseEvent(comp_done_event), "Release event object. (clReleaseEvent)");
     // Write the N parameter.
     checkCUDAErr(clSetKernelArg(check_more_ns_kernel, ARGNO_N, sizeof(n), (void *)&n),
       "Error: Setting kernel argument. (N)\n");
+
+    // Set up for shift.
+    if(n >= *this_n_subsection) {
+      if(n > *this_n_subsection) fprintf(stderr, "Warning: N, %u, > expected N, %u\n", n, *this_n_subsection);
+      shift = 1;
+      this_n_subsection--;
+    } else shift = 0;
+    if(shift != lastshift) {
+      // Write the shift parameter.
+      //printf("Passing shift=%u at n=%u\n", shift, n);
+      checkCUDAErr(clSetKernelArg(check_more_ns_kernel, ARGNO_shift, sizeof(shift), (void *)&shift),
+          "Error: Setting kernel argument. (N)\n");
+    }
+    lastshift = shift;
 
     // Note that comp_done_event is set many times.  Only the last one is kept after the loop.
     checkCUDAErr(clEnqueueNDRangeKernel(commandQueue,

@@ -889,13 +889,13 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
   const unsigned int b_hi = (unsigned int)(b >> 32);
   uint64_t m1 = __umul64(a_lo, b_hi);
   uint64_t m2 = __umul64(a_hi, b_lo);
-  //unsigned int           carry;
+  unsigned int           carry;
 
-  m1 += m2 + __umulhi(a_lo, b_lo);
-  //carry = (((uint64_t)0) + __umulhi(a_lo, b_lo) + (unsigned int)m1 + (unsigned int)m2) >> 32;
+  //m1 += m2 + __umulhi(a_lo, b_lo);
+  carry = (((uint64_t)__umulhi(a_lo, b_lo)) + (unsigned int)m1 + (unsigned int)m2) >> 32;
 
-  //return a_hi * b_hi + (m1 >> 32) + (m2 >> 32) + carry;
-  return __umul64(a_hi, b_hi) + (m1 >> 32);
+  return __umul64(a_hi, b_hi) + (m1 >> 32) + (m2 >> 32) + carry;
+  //return __umul64(a_hi, b_hi) + (m1 >> 32);
 }
 #endif
 
@@ -963,11 +963,9 @@ static uint64_t onemod_REDC(const uint64_t N, uint64_t rax) {
 }
 
 // Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-/*
 static uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) {
   return onemod_REDC(N, Ns*a);
 }
-*/
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
@@ -1025,9 +1023,6 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
   unsigned int i;
   uint64_t k0, kPs;
   uint64_t kpos;
-#ifdef SEARCH_TWIN
-  uint64_t kneg;
-#endif
   uint64_t Ps;
   int cands_found = 0;
 
@@ -1099,7 +1094,7 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     n += ld_nstep;
   } while (n < l_nmax);
   if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64" between %u and %u.\n", bmprefix(), my_P, l_nmin, l_nmax);
 #ifdef USE_BOINC
     bexit(ERR_NEG);
 #endif
@@ -1116,7 +1111,10 @@ INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned 
       // Test that P, at the location(s) specified.
       for(j=0; j < 8; j++) {
         //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
-        if(factorlist & 1) test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        if(factorlist & 1) {
+          //printf("Checking for factor in section %u.\n", j);
+          test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        }
         factorlist >>= 1;
       }
     }

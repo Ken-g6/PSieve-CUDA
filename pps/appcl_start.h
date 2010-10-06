@@ -1,6 +1,8 @@
 /* appcu.h -- (C) Ken Brazier August 2010.
 
    Proth Prime Search sieve OpenCL portion (for many K and many N).
+   appcl_start.h is combined with appcl.cl, using Perl, to produce appcl.h.
+   You should edit appcl_start.h, not appcl.h.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -40,9 +42,11 @@
 #define KERNELOF_d_r0 start_ns_kernel
 
 // check_more_ns_kernel
-#define ARGNO_d_kmin 5
+#define ARGNO_shift 5
+#define KERNELOF_shift check_more_ns_kernel
+#define ARGNO_d_kmin 6
 #define KERNELOF_d_kmin check_more_ns_kernel
-#define ARGNO_d_kmax 6
+#define ARGNO_d_kmax 7
 #define KERNELOF_d_kmax check_more_ns_kernel
 
 // Sorry, I went a little nuts here.
@@ -79,6 +83,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count);
 void check_ns(const uint64_t *P, const unsigned int cthread_count);
 void get_factors_found(unsigned int *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay);
 void cuda_finalize(void);
+int get_n_subsection_start(int index);
 
 extern unsigned int ld_nstep;
 extern int ld_bbits;

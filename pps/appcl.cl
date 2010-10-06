@@ -10,7 +10,9 @@
  */
 
 //#define KERNEL_ONLY
-//#pragma OPENCL EXTENSION cl_amd_printf : enable
+#ifdef _DEVICEEMU
+#pragma OPENCL EXTENSION cl_amd_printf : enable
+#endif
 //#pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 /*
 #define D_MONT_NSTEP 35u
@@ -97,9 +99,9 @@ VLONG onemod_REDC(const VLONG N, VLONG rax) {
   //rcx = 0;
   //"cmpq $1,%%rax \n\t"      // if rax != 0, increase rcx 	Cycle 13
   //"sbbq $-1,%%rcx\n\t"	//				Cycle 14-15
-  rcx = (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0));	// if rax != 0, increase rcx
+  //rcx = (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0));	// if rax != 0, increase rcx
   //"mulq %[N]\n\t"           // rdx:rax = m * N 		Cycle 13?-19?
-  rax = mad_hi(rax, N, rcx);
+  rax = mad_hi(rax, N, ((VLONG)VECTORIZE(1)));
   //"lea (%%rcx,%%rdx,1), %[r]\n\t" // compute (rdx + rcx) mod N  C 20 
   rcx = rax - N;
   rax = (rax>N)?rcx:rax;
@@ -160,6 +162,23 @@ VLONG shiftmod_REDC (const VLONG a,
 
   return rax;
 }
+
+// Same function, for a constant NSTEP.
+#if D_NSTEP == 22
+#define SHIFTMOD_REDCX(NSTEP) \
+VLONG shiftmod_REDC##NSTEP (const VLONG a, const VLONG N, VLONG rax) { \
+  VLONG rcx; \
+  rax = rax << (64-NSTEP); \
+  rcx = a >> NSTEP; \
+  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0)); \
+  rax = mad_hi(rax, N, rcx); \
+  rcx = rax - N; \
+  rax = (rax>N)?rcx:rax; \
+  return rax; \
+}
+SHIFTMOD_REDCX(21)
+SHIFTMOD_REDCX(42)
+#endif
 
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 VLONG
@@ -235,13 +254,18 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         I.X = (uint)(kpos.X>>32); \
         I.X=63 - clz (I.X & -I.X); \
       }
+#ifdef SEARCH_TWIN
+#define NSTEP_COMP <= D_NSTEP
+#else
+#define NSTEP_COMP < D_NSTEP
+#endif
     // Just flag this if kpos <= d_kmax.
 #ifdef D_KMAX
 #define VEC_FLAG_TEST(X) \
     if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
      if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
-      if((kpos.X >> v.X) >= D_KMIN) \
-        my_factor_found.X = 1; \
+      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
+        my_factor_found.X |= 1; \
      } \
     }
 #else
@@ -252,8 +276,8 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #endif
 #define VEC_FLAG_TEST(X) \
     if ((kpos.X >> v.X) <= d_kmax) { \
-      if((kpos.X >> v.X) >= THE_KMIN) \
-        my_factor_found.X = 1; \
+      if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
+        my_factor_found.X |= 1; \
     }
 #endif
 #if(VECSIZE == 2)
@@ -289,15 +313,24 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
       v=31u - clz (v & -v); \
     }
 
+#ifdef SEARCH_TWIN
+// Select the even one here, so as to use the zero count and shift.
+// The other side (whether positive or negative) is odd then, with no zeroes on the right.
+#define TWIN_CHOOSE_EVEN_K0 kpos = (((k0) & (VLONG)VECTORIZE(1)) == (VLONG)VECTORIZE(1))?(my_P - k0):k0;
+//#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
+#define TWIN_CHOOSE_EVEN kpos = (((kpos) & (VLONG)VECTORIZE(1)) == (VLONG)VECTORIZE(1))?(my_P - kpos):kpos;
+#else
+#define TWIN_CHOOSE_EVEN_K0 kpos = k0;
+#define TWIN_CHOOSE_EVEN
+#endif
 
-
-__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N
+__kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N, const uint shift
                                  // Device constants
 #ifndef D_KMIN
-                                 , const ulong d_kmin		// 5
+                                 , const ulong d_kmin		// 6
 #endif
 #ifndef D_KMAX
-                                 , const ulong d_kmax		// 6
+                                 , const ulong d_kmax		// 7
 #endif
                                  ) {
   VINT v;
@@ -306,7 +339,10 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   uint n = N;
   VLONG k0;// = K[v.x];
   VINT my_factor_found;// = factor_found_arr[v.x];
-  VLONG kpos; //, kPs;
+  VLONG kpos;
+#if D_NSTEP == 32 || D_NSTEP == 22
+  VLONG kPs;
+#endif
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
@@ -315,25 +351,63 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   k0 = VLOAD(v.x, K);
   my_P = VLOAD(v.x, P);
   my_factor_found = VLOAD(v.x, factor_found_arr);
-  
+  my_factor_found <<= shift;
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
-    // Get K from the Montgomery form.
+#if D_NSTEP == 32 || D_NSTEP == 22
+    // Get next K from the Montgomery form.
     // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kpos = k0;
+    kPs = k0 * Ps;
+#endif
+    TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
     ALL_IF_CTZLL
 
     // Just flag this if kpos <= d_kmax.
     ALL_FLAG_TEST
 
+#if D_NSTEP == 32 || D_NSTEP == 22
+#if D_NSTEP == 32
+    n += 32;
+    kpos = shiftmod_REDC(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
+    //i = __ffsll(kpos)-1;
+    ALL_IF_CTZLL
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+    n += 32;
+#else // D_NSTEP == 22
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
+    n += 21;
+    //i = __ffsll(kpos)-1;
+    ALL_IF_CTZLL
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
+    n += 21;
+    //i = __ffsll(kpos)-1;
+    ALL_IF_CTZLL
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+    n += 22;
+#endif
+    // Proceed 64 N's to the next starting point.
+    k0 = onemod_REDC(my_P, kPs);
+#else
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     kpos = k0 * Ps;
-    k0 = shiftmod_REDC(k0, my_P, kpos);
     n += D_NSTEP;
+    k0 = shiftmod_REDC(k0, my_P, kpos);
+#endif
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (VINT)k0);
