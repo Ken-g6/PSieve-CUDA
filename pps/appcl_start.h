@@ -15,7 +15,7 @@
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 64
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
-#define ITERATIONS_PER_KERNEL 300
+#define ITERATIONS_PER_KERNEL 512
 
 #define VECSIZE 2
 

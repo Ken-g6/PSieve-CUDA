@@ -252,7 +252,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
           I.X=31u - clz (I.X & -I.X); \
       } else { \
         I.X = (uint)(kpos.X>>32); \
-        I.X=63 - clz (I.X & -I.X); \
+        I.X=63u - clz (I.X & -I.X); \
       }
 #ifdef SEARCH_TWIN
 #define NSTEP_COMP <= D_NSTEP

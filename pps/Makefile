@@ -44,7 +44,7 @@ CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
 #DOEMU = -deviceemu -D_DEVICEEMU -g
 COMMON_FLAGS = -O3 -DNDEBUG -D_REENTRANT -I. -I..
 # Uncomment -D_DEVICEEMU below to use ATI OpenCL device emulation.
-CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS) # -D_DEVICEEMU
+CFLAGS = -Wall -fomit-frame-pointer -s $(COMMON_FLAGS) #-D_DEVICEEMU
 NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 CL_LINK = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86
@@ -152,7 +152,7 @@ $(CL_APPNAME)-boinc-x86_64-linux: $(CL_BOINC_OBJS64)
 app.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(CFLAGS) $<
 
-cl_app.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
+cl_app.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(CFLAGS) $(CL_DEFINE) $<
 
 appcu.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
@@ -184,7 +184,7 @@ tpappcu.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 app_boinc.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(BOINC_CFLAGS) $<
 
-cl_app_boinc.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
+cl_app_boinc.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(BOINC_CFLAGS) $(CL_DEFINE) $<
 
 appcu_boinc.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
@@ -225,7 +225,7 @@ appcl.o: appcl.cpp appcl.h
 app64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(CFLAGS) $<
 
-cl_app64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
+cl_app64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(CFLAGS) $(CL_DEFINE) $<
 
 appcu64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
@@ -257,7 +257,7 @@ tpappcu64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 app_boinc64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(BOINC_CFLAGS) $<
 
-cl_app_boinc64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
+cl_app_boinc64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(BOINC_CFLAGS) $(CL_DEFINE) $<
 
 appcu_boinc64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
