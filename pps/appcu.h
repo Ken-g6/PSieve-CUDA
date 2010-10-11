@@ -13,11 +13,8 @@
 // BLOCKSIZE should be a power of two for greatest efficiency.
 #define BLOCKSIZE 128
 // Maximum iterations to be run by any one kernel.  Breaking up the kernel this way should improve display effects.
-#ifdef SEARCH_TWIN
-#define ITERATIONS_PER_KERNEL 100
-#else
-#define ITERATIONS_PER_KERNEL 512
-#endif
+// This will be shrunk if the N range is too small.
+#define ITERATIONS_PER_KERNEL 1024
 
 // Maximum time to sleep per K set, per N, in nanoseconds.
 // For PPSE sieve (7/2010), 3*2,000,000 N's = about 6 seconds.

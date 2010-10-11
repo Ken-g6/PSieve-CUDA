@@ -143,8 +143,11 @@ bool SetCUDABlockingSync(int device) {
 }
 
 static void sleep_for_server() {
-  //bmsg("Sleeping 10 minutes to give the server a break.\n");
-  //sleep(600);
+#ifdef USE_BOINC
+  printf("Sleeping 10 minutes to give the server a break.\n");
+  bmsg("Sleeping 10 minutes to give the server a break.\n");
+  sleep(600);
+#endif
 }
 
 /* This function is called once before any threads are started.
@@ -165,7 +168,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
     fprintf(stderr, "Cuda error: getting device properties: %s\n", cudaGetErrorString(cudaGetLastError()));
-    sleep_for_server();
+    //sleep_for_server();
     bexit(ERR_NOT_IMPLEMENTED);
 #else
     return 0;
