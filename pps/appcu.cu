@@ -43,8 +43,8 @@ unsigned int ld_nstep;
 int ld_bbits;
 uint64_t ld_r0;
 // Stores the N to start at for the given bit position in 
-unsigned int n_subsection_start[9];
-static unsigned int *first_n_subsection = &n_subsection_start[7];
+//unsigned int n_subsection_start[9];
+//static unsigned int *first_n_subsection = &n_subsection_start[7];
 
 // Device constants
 //__constant__ unsigned int d_bitsatatime;
@@ -73,16 +73,17 @@ unsigned char *d_factor_found;
 //const int setup_ps_overlap = 5000;
 const int check_ns_overlap = 50000;
 
-static unsigned int ld_kernel_nstep;
+static unsigned int *thread_kernel_nstep;
+static struct cudaDeviceProp *ccapability;
 static int max_ns_delay = 0;
-static int ccapability = 1;
+//static int ccapability = 1;
 
 //globals for cuda
 cudaEvent_t stop;
 cudaStream_t stream;
 
 // A getter for n_subsection_start.  Yes, in C!
-int get_n_subsection_start(int index) { return n_subsection_start[index]; }
+//int get_n_subsection_start(int index) { return n_subsection_start[index]; }
 
 // find the log base 2 of a number.  Need not be fast; only done once.
 int lg2(uint64_t v) {
@@ -150,12 +151,64 @@ static void sleep_for_server() {
 #endif
 }
 
-/* This function is called once before any threads are started.
+void cuda_init(void) {
+  // Set the constants.
+  //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
+  max_ns_delay = (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N);
+  if (ld_nstep > (nmax-nmin+1))
+    ld_nstep = (nmax-nmin+1);
+
+  //assert((1ul << (64-nstep)) < pmin);
+  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
+    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    cuda_finalize();
+    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+      pmin *= 2;
+      ld_nstep++;
+    }
+    if(pmin_1 < pmin) pmin = pmin_1;
+#ifndef _WIN32
+    fprintf(stderr, "This program will work by the time pmin == %lu.\n", pmin);
+#endif
+    bexit(ERR_INVALID_PARAM);
+  }
+#ifdef SEARCH_TWIN
+  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -.
+  ld_nstep--;
+#endif
+  // Use the 32-step algorithm where useful.
+  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
+    if(ld_nstep != 32) printf("nstep changed to 32\n");
+    ld_nstep = 32;
+  } else {
+    printf("Didn't change nstep from %u\n", ld_nstep);
+  }
+
+  ld_bbits = lg2(nmin);
+  //assert(d_r0 <= 32);
+  if(ld_bbits < 6) {
+    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+    cuda_finalize();
+    bexit(ERR_INVALID_PARAM);
+  }
+  // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
+  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
+  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
+
+  ld_bbits = ld_bbits-6;
+
+  // Allocate arrays.
+  thread_kernel_nstep = (unsigned int *)xmalloc(num_threads*sizeof(unsigned int));
+  ccapability = (struct cudaDeviceProp *)xmalloc(num_threads*sizeof(struct cudaDeviceProp));
+}
+
+/* This function is called once per thread.
  */
 unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 {
-  unsigned int i;
-  struct cudaDeviceProp gpuprop;
+  unsigned int i, ld_kernel_nstep;
+  struct cudaDeviceProp *gpuprop;
   //unsigned int ld_bitsatatime = 0;
   //unsigned int ld_halflen=(1<<bitsatatime)/2; 
   //unsigned int ld_bitsmask;
@@ -164,7 +217,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   bool blocking_sync_ok=true;
 
   // Find the GPU's properties.
-  if(cudaGetDeviceProperties(&gpuprop, gpuno) != cudaSuccess) {
+  if(cudaGetDeviceProperties(&ccapability[gpuno], gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
     fprintf(stderr, "Cuda error: getting device properties: %s\n", cudaGetErrorString(cudaGetLastError()));
@@ -174,6 +227,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     return 0;
 #endif
   }
+  gpuprop = &ccapability[gpuno];
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
     bmsg("Error: PMin is too small, <= 2^32!\n");
@@ -182,35 +236,33 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   blocking_sync_ok = SetCUDABlockingSync(gpuno);
   if(blocking_sync_ok == false) bmsg("Blocking sync setup failed; try upgrading your drivers.\n");
   //  cudaSetDevice(gpuno);
-  fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop.name);
-  fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop.major, gpuprop.minor);
+  fprintf(stderr, "%sDetected GPU %d: %s\n", bmprefix(), gpuno, gpuprop->name);
+  fprintf(stderr, "%sDetected compute capability: %d.%d\n", bmprefix(), gpuprop->major, gpuprop->minor);
 #ifndef _DEVICEEMU
-  if(gpuprop.major == 9999 && gpuprop.minor == 9999) {
+  if(gpuprop->major == 9999 && gpuprop->minor == 9999) {
     bmsg("Detected emulator!  We can't use that!\n");
     sleep_for_server();
     bexit(ERR_NOT_IMPLEMENTED);  // System call not implemented on this platform: it's a CPU, not a GPU!
   }
 #endif
     
-  fprintf(stderr, "%sDetected %d multiprocessors.\n", bmprefix(), gpuprop.multiProcessorCount);
-  //fprintf(stderr, "%sDetected %lu bytes of device memory.\n", bmprefix(), gpuprop.totalGlobalMem);
+  fprintf(stderr, "%sDetected %d multiprocessors.\n", bmprefix(), gpuprop->multiProcessorCount);
+  //fprintf(stderr, "%sDetected %lu bytes of device memory.\n", bmprefix(), gpuprop->totalGlobalMem);
 
   // Use them to set cthread_count.
   // If cthread_count was already set, make sure it's 0 mod BLOCKSIZE.
   if(cthread_count == 0) {
     // Threads per multiprocessor, based on compute capability, if not manually set.
-    cthread_count = (gpuprop.major == 1 && gpuprop.minor < 2)?384:768;
-    if(gpuprop.major >= 2) cthread_count = 1024*2;
+    cthread_count = (gpuprop->major == 1 && gpuprop->minor < 2)?384:768;
+    if(gpuprop->major >= 2) cthread_count = 1024*2;
   } else {
     if(cthread_count < BLOCKSIZE) cthread_count *= BLOCKSIZE;
     else cthread_count -= cthread_count % BLOCKSIZE;
   }
-  cthread_count *= gpuprop.multiProcessorCount;
+  cthread_count *= gpuprop->multiProcessorCount;
 
-  ccapability = gpuprop.major;
-
-  if(gpuprop.totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
-    fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop.totalGlobalMem));
+  if(gpuprop->totalGlobalMem < cthread_count*(3*sizeof(uint64_t)+sizeof(unsigned char))) {
+    fprintf(stderr, "%sInsufficient GPU memory: %u bytes.\n", bmprefix(), (unsigned int)(gpuprop->totalGlobalMem));
 #ifdef USE_BOINC
     bexit(ERR_INSUFFICIENT_RESOURCE);
 #else
@@ -219,7 +271,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   }
   // Calculate ld_bitsatatime given memory constraints, and possibly nmin-nmax via nstep vs. 2^ld_bitsatatime
   // Things change if nmax-nmin < 1000000 or so, but for now let's go with a constant maximum of ld_bitsatatime<=13.
-  //i = gpuprop.totalGlobalMem/sizeof(uint64_t); // Total number of 64-bit numbers that can be stored.
+  //i = gpuprop->totalGlobalMem/sizeof(uint64_t); // Total number of 64-bit numbers that can be stored.
   //ld_bitsatatime = BITSATATIME;
   //ld_bitsmask = BITSMASK+1;
 
@@ -269,52 +321,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 
   //ld_bitsmask--; // Finalize bitsmask
 
-  if (ld_nstep > (nmax-nmin+1))
-    ld_nstep = (nmax-nmin+1);
 
-  //assert((1ul << (64-nstep)) < pmin);
-  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
-    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
-    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
-    cuda_finalize();
-    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
-      pmin *= 2;
-      ld_nstep++;
-    }
-    if(pmin_1 < pmin) pmin = pmin_1;
-#ifndef _WIN32
-    fprintf(stderr, "This program will work by the time pmin == %lu.\n", pmin);
-#endif
-    bexit(ERR_INVALID_PARAM);
-  }
-#ifdef SEARCH_TWIN
-  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -.
-  ld_nstep--;
-#endif
-  // Use the 32-step algorithm where useful.
-  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
-    if(ld_nstep != 32) printf("nstep changed to 32\n");
-    ld_nstep = 32;
-  } else {
-    printf("Didn't change nstep from %u\n", ld_nstep);
-  }
-  // Set the constants.
-  //cudaMemcpyToSymbol(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
-  max_ns_delay = (int)((nmax-nmin+1)*MAX_NS_DELAY_PER_N);
-
-  // Prepare constants:
-  ld_bbits = lg2(nmin);
-  //assert(d_r0 <= 32);
-  if(ld_bbits < 6) {
-    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
-    cuda_finalize();
-    bexit(ERR_INVALID_PARAM);
-  }
-  // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
-  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
-  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
-
-  ld_bbits = ld_bbits-6;
   cudaMemcpyToSymbol(d_bbits, &ld_bbits, sizeof(ld_bbits));
   // d_mont_nstep is the montgomerized version of nstep.
   i = 64-ld_nstep;
@@ -328,10 +335,10 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(ld_nstep == 32) ld_kernel_nstep /= 2;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
-  ld_kernel_nstep /= (cthread_count/gpuprop.multiProcessorCount);
+  ld_kernel_nstep /= (cthread_count/gpuprop->multiProcessorCount);
   // Increase the step size for Fermis, to reduce memory bandwidth,
   // and because they have more threads running per multiprocessor.
-  if(ccapability >= 2) ld_kernel_nstep *= 3;
+  if(gpuprop->major >= 2) ld_kernel_nstep *= 3;
   // But shrink it to give at least four big N sections.
   if(ld_nstep == 32) i = 2;
   else i = 1;
@@ -343,6 +350,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(ld_nstep == 32) ld_kernel_nstep *= 2;
 
   cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
+  thread_kernel_nstep[gpuno] = ld_kernel_nstep;
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
   cudaMemcpyToSymbol(d_kmin, &kmin, sizeof(kmin));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
@@ -351,13 +359,16 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   i = (search_proth == 1)?1:0;	// search_proth is 1 or -1, not 0.
   cudaMemcpyToSymbol(d_search_proth, &i, sizeof(i));
 
-  // Initialize n_subsection_start
+  // Initialize this n_subsection_start
   // In slot 0 we insert nmax, so I'll refer to the bits as 1-8 to avoid confusion.
   // Bit 1 is the highest part.  Usually bit 8 is the lowest, but sometimes it's a lower bit.
-  n_subsection_start[8] = nmin;
   {
     uint64_t test_n = nmin, next_n;
     int j;
+    unsigned int *n_subsection_start = thread_subsections[gpuno].n_subsection_start;
+
+    thread_subsections[gpuno].first_n_subsection = &n_subsection_start[7];
+    n_subsection_start[8] = nmin;
     for(j=7; j >= 0; j--) {
       // Divide the range into 8 sub-ranges of N's.
       next_n = nmin + ((nmax - nmin + 8)/8)*(8-j);
@@ -367,15 +378,15 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
       // If test_n wasn't changed at all, shrink the range.
       // Horribly inefficient at O(n^2), but n == 9.
       if(test_n == n_subsection_start[j+1]) {
-        first_n_subsection--;
+        thread_subsections[gpuno].first_n_subsection--;
         for(i=j; i < 8; i++)
           n_subsection_start[i] = n_subsection_start[i+1];
       }
     }
+    // Make sure bit 0 is the highest.
+    if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
+    n_subsection_start[0] = nmax;
   }
-  // Make sure bit 0 is the highest.
-  if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
-  n_subsection_start[0] = nmax;
 /*
   printf("Listing N subsections created:\n");
   for(i=0; &n_subsection_start[i] != first_n_subsection; i++)
@@ -632,6 +643,17 @@ static inline __device__ void mad_wide_u32(const unsigned int a, const unsigned 
   // CPU emulation:
   c += ((uint64_t)a) * ((uint64_t)b);
 #endif
+}
+
+static inline __device__ unsigned int __umul24hi(const unsigned int a, const unsigned int b) {
+  unsigned int res;
+#ifndef _DEVICEEMU
+  asm("mul24.hi.u32 %0, %1, %2;" : "=r" (res) : "r" (a) , "r" (b));
+#else
+  // CPU emulation:
+  res = (unsigned int)((((uint64_t)(a&0xFFFFFF)) * ((uint64_t)(b&0xFFFFFF)))>>32);
+#endif
+  return res;
 }
 
 // Same function, specifically designed for 32-bit shift.
@@ -992,6 +1014,82 @@ __device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps,
 #endif
 }
 
+// Same functions again, but with the non-Fermi equivalent of the Fermi test method.  May be faster still!
+// These require that kmax < 2^24.
+#define UNFERMI_TEST_24(STAGE) \
+    if((((unsigned int)k0) & 0xFFFFFF) != 0) { \
+      i = -((unsigned int)k0); \
+      i &= ((unsigned int)k0); \
+      if(__umul24hi((unsigned int)d_kmax, i) >= ((unsigned int)(kpos>>32))) { \
+        i=(__float_as_int(__uint2float_rz(i))>>23)-0x7f; \
+        TEST_SHIFT_SMALL_KMAX2("UnFermi " STAGE) \
+      } \
+    } else { \
+      CTZLL_KPOS \
+      TEST_SHIFT_SMALL_KMAX2("UnFermi rare case " STAGE) \
+    }
+
+__device__ void d_check_some_ns_24(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    UNFERMI_TEST_24("")
+
+    // Proceed to the K for the next N.
+    // kpos is destroyed, just to keep the register count down.
+    // Despite the Montgomery step, this isn't really in Montgomery form.
+    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
+    //kpos = k0 * Ps;
+    n += d_nstep;
+    shiftmod_REDCsm(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
+#endif
+}
+// Device-local function to iterate over some N's.
+// To avoid register pressure, clobbers i, and changes all non-const arguments.
+// This version works only for nstep (== d_mont_nstep) == 32
+__device__ void d_check_some_ns_32_24(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
+    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
+  uint64_t kpos; //, kPs;
+  unsigned int l_nmax = n + d_kernel_nstep;
+  if(l_nmax > d_nmax) l_nmax = d_nmax;
+
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
+#endif
+  do { // Remaining steps are all of equal size nstep
+    // Montgomery form doesn't matter; it's just k*2^64 mod P.
+    // Get a copy of K, which isn't in Montgomery form.
+    TWIN_CHOOSE_EVEN_K0
+    UNFERMI_TEST_24("part 1/2: ")
+
+    // Skip 32 N's.
+    n += 32;
+    shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
+    // Test again, because it's already set up.  Loop unrolling!
+    TWIN_CHOOSE_EVEN_K0
+    UNFERMI_TEST_24("part 2/2: ")
+
+    // Skip 32 N's.
+    n += 32;
+    shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
+  } while(n < l_nmax);
+#ifdef _DEVICEEMU
+  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)kpos);
+#endif
+}
+
 // *** KERNELS ***
 
 // Start checking N's.
@@ -1056,15 +1154,16 @@ CHECK_MORE_NS_KERNEL()
 CHECK_MORE_NS_KERNEL(_small_kmax)
 // Continue checking N's for nstep == 32
 CHECK_MORE_NS_KERNEL(_32)
-// Continue checking N's for nstep == 22
-//CHECK_MORE_NS_KERNEL(_22)
 // Fermi versions of the above:
 // Continue checking N's for small kmax.
 CHECK_MORE_NS_KERNEL(_small_kmax_fermi)
 // Continue checking N's for nstep == 32
 CHECK_MORE_NS_KERNEL(_32_fermi)
-// Continue checking N's for nstep == 22
-//CHECK_MORE_NS_KERNEL(_22_fermi)
+// UnFermi versions of the above, like the Fermi versions, but for 24-bit multiplication:
+// Continue checking N's for small kmax.
+CHECK_MORE_NS_KERNEL(_24)
+// Continue checking N's for nstep == 32
+CHECK_MORE_NS_KERNEL(_32_24)
 
 // *** Host Kernel-calling functions ***
 
@@ -1079,11 +1178,12 @@ CHECK_MORE_NS_KERNEL(_32_fermi)
         checkCUDAErr("kernel " #KERNEL "invocation"); \
       }
 // Pass the arguments to the CUDA device, run the code, and get the results.
-void check_ns(const uint64_t *P, const unsigned int cthread_count) {
+void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th) {
   const unsigned int cblockcount = cthread_count/BLOCKSIZE;
   unsigned int n;
   unsigned int shift = 0;
-  unsigned int *this_n_subsection = first_n_subsection;
+  unsigned int *this_n_subsection = thread_subsections[th].first_n_subsection;
+  unsigned int ld_kernel_nstep = thread_kernel_nstep[th];
   // timing variables:
 
   // Pass P.
@@ -1102,7 +1202,11 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 #endif
   // Continue checking until nmax is reached.
   if(kmax < (((uint64_t)1)<<31) && ld_nstep <= 32) {
-    if(ccapability >= 2) {
+    if(ccapability[th].major >= 2
+#ifdef _DEVICEEMU
+        && ccapability[th].major != 9999
+#endif
+) {
       // Use a Fermi kernel.
       if(ld_nstep == 32) {
         CALL_LOOP(d_check_more_ns_32_fermi)
@@ -1110,10 +1214,18 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
         CALL_LOOP(d_check_more_ns_small_kmax_fermi)
       }
     } else {
-      if(ld_nstep == 32) {
-        CALL_LOOP(d_check_more_ns_32)
+      if(kmax <= 0xFFFFFF) {
+        if(ld_nstep == 32) {
+          CALL_LOOP(d_check_more_ns_32_24)
+        } else {
+          CALL_LOOP(d_check_more_ns_24)
+        }
       } else {
-        CALL_LOOP(d_check_more_ns_small_kmax)
+        if(ld_nstep == 32) {
+          CALL_LOOP(d_check_more_ns_32)
+        } else {
+          CALL_LOOP(d_check_more_ns_small_kmax)
+        }
       }
     }
     //#endif

@@ -18,6 +18,10 @@
 #define XSTR(ARG) STR(ARG)
 #define STR(ARG) #ARG
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* malloc-or-die functions */
 void *xmalloc(size_t size);
 void *xrealloc(void *mem, size_t size);
@@ -37,4 +41,8 @@ int parse_uint64(uint64_t *result, const char *str,
 #ifndef __GNUC__
 unsigned long __builtin_ctzll(unsigned __int64 i);
 #endif
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* _UTIL_H */

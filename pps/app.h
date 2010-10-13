@@ -15,7 +15,7 @@
 #include <stdio.h>
 #include "stdint.h"
 
-#define APP_VERSION "cuda-0.2.2-alpha"
+#define APP_VERSION "cuda-0.2.2"
 
 #ifdef SEARCH_TWIN
 #define APP_PREFIX "tp"
@@ -84,9 +84,16 @@ void app_fini(void);
 #ifdef __cplusplus
 extern "C" {
 #endif
+struct n_subsection {
+	unsigned int n_subsection_start[9];
+	// Stores the N to start at for the given bit position
+	unsigned int *first_n_subsection;
+};
+extern struct n_subsection *thread_subsections;
 extern unsigned int nmin, nmax;
 extern int search_proth;
 extern uint64_t kmax, kmin;
+
 #ifdef __cplusplus
 }
 #endif

@@ -94,7 +94,7 @@ static int file_format = FORMAT_ABCD;
 static int print_factors = 1;
 int search_proth = 1; // Search for Proth or Riesel numbers?
 int *check_ns_delay;
-static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
+//static unsigned int bitsatatime = 8; // Bits to process at a time, with v0.4 algorithm.
 //static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
@@ -105,6 +105,8 @@ static uint64_t r0arr[9];
 static int bbitsarr[9];
 static unsigned int kstep = KSTEP;
 static unsigned int koffset = KOFFSET;
+
+struct n_subsection *thread_subsections;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -759,6 +761,11 @@ void app_init(void)
     gpu_started[i] = (uint64_t)0;
   }
 
+  // Allocate the N subsections for each thread.
+  thread_subsections = xmalloc(num_threads*sizeof(struct n_subsection));
+
+  cuda_init();
+
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
   InitializeCriticalSection(&factors_mutex);
@@ -772,6 +779,8 @@ void app_init(void)
   fflush(stdout);
 }
 
+// Replacing the getter in appcu.cu with a macro.
+#define get_n_subsection_start(X) thread_subsections[th].n_subsection_start[X]
 /* This function is called once in thread th, 0 <= th < num_threads, before
    the first call to app_thread_fun(th, ...).
  */
@@ -964,6 +973,31 @@ static uint64_t shiftmod_REDC (const uint64_t a,
 
   return rax;
 }
+// Same function, but for 32 bits or less nstep.
+static uint64_t shiftmod_REDC_sm (uint64_t rcx, 
+             const uint64_t N, unsigned int rax)
+{
+  unsigned int d_mont_nstep = 32-ld_nstep;
+
+  rax <<= d_mont_nstep; // So this is (a*Ns*(1<<s) == (a<<s)*Ns) >> 32.
+  rcx >>= ld_nstep;
+  rcx += __umulhi(rax, (unsigned int)N) + ((rax!=0)?1:0);
+  rcx += __umul64(rax, (unsigned int)(N>>32));
+  //rcx = rax - N;
+  rcx = (rcx>N)?(rcx-N):rcx;
+
+  /*
+#ifdef DEBUG64
+  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
+  {
+    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
+    bexit(ERR_NEG);
+  }
+#endif
+*/
+
+  return rcx;
+}
 
 // Hybrid powmod, sidestepping several loops and possible mispredicts, and with no longmod!
 /* Compute (2^-1)^b (mod m), using Montgomery arithmetic. */
@@ -995,9 +1029,9 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
   unsigned int i;
   uint64_t k0, kPs;
   uint64_t kpos;
-#ifdef SEARCH_TWIN
-  uint64_t kneg;
-#endif
+//#ifdef SEARCH_TWIN
+  //uint64_t kneg;
+//#endif
   uint64_t Ps;
   int cands_found = 0;
 
@@ -1065,8 +1099,82 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     }
 
     // Proceed to the K for the next N.
-    k0 = shiftmod_REDC(k0, my_P, kPs);
     n += ld_nstep;
+    k0 = shiftmod_REDC(k0, my_P, kPs);
+  } while (n < l_nmax);
+  if(cands_found == 0) {
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
+#ifdef USE_BOINC
+    bexit(ERR_NEG);
+#endif
+  }
+}
+
+void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
+  unsigned int n = l_nmin; // = nmin;
+  unsigned int i;
+  uint64_t k0; //, kPs;
+  uint64_t kpos;
+//#ifdef SEARCH_TWIN
+  //uint64_t kneg;
+//#endif
+  uint64_t Ps;
+  int cands_found = 0;
+
+  //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
+  
+  // Better get this done before the first mulmod.
+  Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+  
+  // Calculate k0, in Montgomery form.
+  k0 = invpowmod_REDClr(my_P, Ps, l_nmin, r0, l_bbits);
+  //printf("k0[%u] = %lu\n", l_nmin, k0);
+
+  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (CPU)\n", my_P, Ps);
+#ifdef SEARCH_TWIN
+    // Select the first odd one.  All others are tested by overlap.
+    kpos = (k0&1)?k0:(my_P - k0);
+    if (kpos <= kmax && kpos >= kmin) {
+      cands_found++;
+      test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
+    }
+#endif
+
+#ifndef SEARCH_TWIN
+  if(search_proth == 1) k0 = my_P-k0;
+#endif
+
+  do { // Remaining steps are all of equal size nstep
+    // Get K from the Montgomery form.
+    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    kpos = k0;
+#ifdef SEARCH_TWIN
+    // Select the even one.
+    kpos = (kpos&1)?(my_P - kpos):kpos;
+#endif
+    //i = __ffsll(kpos)-1;
+    //i = __builtin_ctzll(kpos);
+    BSFQ(i, kpos, 2);
+
+#ifdef SEARCH_TWIN
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
+#else
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
+#endif
+      cands_found++;
+      //if (i < ld_nstep)
+#ifdef SEARCH_TWIN
+        test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
+#else
+        test_factor(my_P,(kpos>>i),n+i,search_proth);
+#endif
+    }
+
+    // Proceed to the K for the next N.
+    n += ld_nstep;
+    //kpos = shiftmod_REDC(k0, my_P, k0*Ps);
+    k0 = shiftmod_REDC_sm(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
+    //if(kpos != k0) printf("Expected k0=%lu, but got %lu!\n", kpos, k0);
   } while (n < l_nmax);
   if(cands_found == 0) {
     fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
@@ -1086,7 +1194,14 @@ INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned 
       // Test that P, at the location(s) specified.
       for(j=0; j < 8; j++) {
         //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
-        if(factorlist & 1) test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        if(factorlist & 1) {
+#ifndef __x86_64__
+          if(nstep <= 32) 
+            test_one_p_sm(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+          else
+#endif
+            test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+        }
         factorlist >>= 1;
       }
     }
@@ -1108,7 +1223,7 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
   }
 
   // Start the next kernel.
-  check_ns(P, cthread_count);
+  check_ns(P, cthread_count, th);
   new_start_time = elapsed_usec();
   //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
 
