@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-unsigned int cuda_app_init(int gpuno, unsigned int cthread_count);
+unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count);
 //void setup_ps(const uint64_t *P, unsigned int cthread_count);
 void check_ns(const uint64_t *P, const unsigned int cthread_count,const int th);
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay);

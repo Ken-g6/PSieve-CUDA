@@ -789,9 +789,9 @@ unsigned int app_thread_init(int th)
   unsigned int i, cthread_count;
 
   if(device_opt >= 0) {
-    cthread_count = cuda_app_init(device_opt, user_cthread_count);
+    cthread_count = cuda_app_init(device_opt, th, user_cthread_count);
   } else {
-    cthread_count = cuda_app_init(th, user_cthread_count);
+    cthread_count = cuda_app_init(th, th, user_cthread_count);
   }
   // Create r0arr (which gives starting values for the REDC code.)
   //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);

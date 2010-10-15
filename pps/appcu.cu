@@ -205,7 +205,7 @@ void cuda_init(void) {
 
 /* This function is called once per thread.
  */
-unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
+unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count)
 {
   unsigned int i, ld_kernel_nstep;
   struct cudaDeviceProp *gpuprop;
@@ -217,7 +217,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   bool blocking_sync_ok=true;
 
   // Find the GPU's properties.
-  if(cudaGetDeviceProperties(&ccapability[gpuno], gpuno) != cudaSuccess) {
+  if(cudaGetDeviceProperties(&ccapability[th], gpuno) != cudaSuccess) {
     fprintf(stderr, "%sGPU %d not compute-capable.\n", bmprefix(), gpuno);
 #ifdef USE_BOINC
     fprintf(stderr, "Cuda error: getting device properties: %s\n", cudaGetErrorString(cudaGetLastError()));
@@ -227,7 +227,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     return 0;
 #endif
   }
-  gpuprop = &ccapability[gpuno];
+  gpuprop = &ccapability[th];
   /* Assume N >= 2^32. */
   if(pmin <= ((uint64_t)1)<<32) {
     bmsg("Error: PMin is too small, <= 2^32!\n");
@@ -350,7 +350,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   if(ld_nstep == 32) ld_kernel_nstep *= 2;
 
   cudaMemcpyToSymbol(d_kernel_nstep, &ld_kernel_nstep, sizeof(ld_kernel_nstep));
-  thread_kernel_nstep[gpuno] = ld_kernel_nstep;
+  thread_kernel_nstep[th] = ld_kernel_nstep;
   cudaMemcpyToSymbol(d_kmax, &kmax, sizeof(kmax));
   cudaMemcpyToSymbol(d_kmin, &kmin, sizeof(kmin));
   cudaMemcpyToSymbol(d_nmin, &nmin, sizeof(nmin));
@@ -365,9 +365,9 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   {
     uint64_t test_n = nmin, next_n;
     int j;
-    unsigned int *n_subsection_start = thread_subsections[gpuno].n_subsection_start;
+    unsigned int *n_subsection_start = thread_subsections[th].n_subsection_start;
 
-    thread_subsections[gpuno].first_n_subsection = &n_subsection_start[7];
+    thread_subsections[th].first_n_subsection = &n_subsection_start[7];
     n_subsection_start[8] = nmin;
     for(j=7; j >= 0; j--) {
       // Divide the range into 8 sub-ranges of N's.
@@ -378,7 +378,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
       // If test_n wasn't changed at all, shrink the range.
       // Horribly inefficient at O(n^2), but n == 9.
       if(test_n == n_subsection_start[j+1]) {
-        thread_subsections[gpuno].first_n_subsection--;
+        thread_subsections[th].first_n_subsection--;
         for(i=j; i < 8; i++)
           n_subsection_start[i] = n_subsection_start[i+1];
       }
