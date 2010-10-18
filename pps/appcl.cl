@@ -130,23 +130,6 @@ VLONG mod_REDC(const VLONG a, const VLONG N, const VLONG Ns) {
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
 // rax's original value is destroyed, just to keep the register count down.
-#if D_NSTEP <= 32
-// Version with fewer multiplies:
-VLONG shiftmod_REDC (VLONG rcx, const VLONG N, VINT rax)
-{
-  //( "mulq %[b]\n\t"           // rdx:rax = T 			Cycles 1-7
-#if D_NSTEP < 32
-  rax <<= (D_MONT_NSTEP-32); // So this is a*Ns*(1<<s) == (a<<s)*Ns.
-#endif
-  rcx >>= D_NSTEP;
-  rcx += V2VLONG(mad_hi(rax, V2VINT(N), (rax!=(VINT)VECTORIZE(0))?((VINT)VECTORIZE(1)):((VINT)VECTORIZE(0))));	// if rax != 0, increase rcx
-  rcx += (V2VLONG(mul_hi(rax, V2VINT(N>>32)))<<32) | V2VLONG(rax * V2VINT(N>>32));
-
-  rcx = (rcx>N)?(rcx-N):rcx;
-
-  return rcx;
-}
-#else
 VLONG shiftmod_REDC (const VLONG a, 
     const VLONG N, VLONG rax)
 {
@@ -179,6 +162,22 @@ VLONG shiftmod_REDC (const VLONG a,
 
   return rax;
 }
+
+// Same function, for a constant NSTEP.
+#if D_NSTEP == 22
+#define SHIFTMOD_REDCX(NSTEP) \
+VLONG shiftmod_REDC##NSTEP (const VLONG a, const VLONG N, VLONG rax) { \
+  VLONG rcx; \
+  rax = rax << (64-NSTEP); \
+  rcx = a >> NSTEP; \
+  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0)); \
+  rax = mad_hi(rax, N, rcx); \
+  rcx = rax - N; \
+  rax = (rax>N)?rcx:rax; \
+  return rax; \
+}
+SHIFTMOD_REDCX(21)
+SHIFTMOD_REDCX(42)
 #endif
 
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
@@ -215,7 +214,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
                                  // Device constants
                                  const ulong d_r0			// 4
                                  ) {
-  //uint n = D_NMIN; // = nmin;
+  uint n = D_NMIN; // = nmin;
   uint i;
   VLONG k0;
   VLONG my_P, my_Ps;
@@ -255,7 +254,6 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         I.X = (uint)(kpos.X>>32); \
         I.X=63u - clz (I.X & -I.X); \
       }
-#define VEC_CTZLL2(I,X) VEC_CTZLL(I,X)
 #ifdef SEARCH_TWIN
 #define NSTEP_COMP <= D_NSTEP
 #else
@@ -282,7 +280,6 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         my_factor_found.X |= 1; \
     }
 #endif
-#define VEC_FLAG_TEST2(X) VEC_FLAG_TEST(X)
 #if(VECSIZE == 2)
 #define ALL_CTZLL \
       VEC_CTZLL(v,x) \
@@ -308,48 +305,13 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #endif
       // ALL_CTZLL happens, but my calculator can't compute how rarely!
       // About 1 in every 2^30 times.
-#ifndef D_KMAX
 #define ALL_IF_CTZLL \
     v = V2VINT(kpos); \
     VEC_IF { \
       ALL_CTZLL \
     } else { \
       v=31u - clz (v & -v); \
-    } \
-    ALL_FLAG_TEST
-#else
-// This is based on the CPU "alternate algorithm", because clz probably takes at least as long as mul_hi on AMD.  (CPUs and GPUs!)
-#define VEC_SHIFT_TEST(V,X) \
-  if(V.X >= kpos_hi.X) { \
-    V.X = (uint)(kpos.X); \
-    VEC_CTZLL2(V,X); \
-    VEC_FLAG_TEST2(X); \
-  }
-#if(VECSIZE == 2)
-#define ALL_SHIFT_TEST \
-  VEC_SHIFT_TEST(v,x) \
-  VEC_SHIFT_TEST(v,y)
-#elif(VECSIZE == 4)
-#define ALL_SHIFT_TEST \
-  VEC_SHIFT_TEST(v,x) \
-  VEC_SHIFT_TEST(v,y) \
-  VEC_SHIFT_TEST(v,z) \
-  VEC_SHIFT_TEST(v,w)
-#else
-#error "Invalid vecsize" #VECSIZE
-#endif
-#define ALL_IF_CTZLL \
-    v = V2VINT(kpos); \
-    VEC_IF { \
-      ALL_CTZLL \
-      ALL_FLAG_TEST \
-    } else { \
-      VINT kpos_hi = V2VINT(kpos >> 32); \
-      v = v & -v; \
-      v = mul_hi(v, (VINT)VECTORIZE(D_KMAX)); \
-      ALL_SHIFT_TEST \
     }
-#endif
 
 #ifdef SEARCH_TWIN
 // Select the even one here, so as to use the zero count and shift.
@@ -373,28 +335,19 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
                                  ) {
   VINT v;
   VLONG my_P;// = P[v.x];
-#if D_NSTEP <= 32
-  VINT Ps;// = Psarr[v.x];
-#else
   VLONG Ps;// = Psarr[v.x];
-#endif
   uint n = N;
   VLONG k0;// = K[v.x];
   VINT my_factor_found;// = factor_found_arr[v.x];
   VLONG kpos;
-//#if D_NSTEP == 32 || D_NSTEP == 22
-  //VLONG kPs;
-//#endif
+#if D_NSTEP == 32 || D_NSTEP == 22
+  VLONG kPs;
+#endif
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
   v.x = get_global_id(0);
-#if D_NSTEP <= 32
-  k0 = VLOAD(v.x, Psarr);
-  Ps = V2VINT(k0);
-#else
   Ps = VLOAD(v.x, Psarr);
-#endif
   k0 = VLOAD(v.x, K);
   my_P = VLOAD(v.x, P);
   my_factor_found = VLOAD(v.x, factor_found_arr);
@@ -403,22 +356,51 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
+#if D_NSTEP == 32 || D_NSTEP == 22
+    // Get next K from the Montgomery form.
+    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
+    kPs = k0 * Ps;
+#endif
     TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
     ALL_IF_CTZLL
 
-#if D_NSTEP <= 32
-    v = V2VINT(k0)*Ps;
-    n += D_NSTEP;
-    k0 = shiftmod_REDC(k0, my_P, v);
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+
+#if D_NSTEP == 32 || D_NSTEP == 22
 #if D_NSTEP == 32
-    TWIN_CHOOSE_EVEN_K0
+    n += 32;
+    kpos = shiftmod_REDC(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
     //i = __ffsll(kpos)-1;
     ALL_IF_CTZLL
-    v = V2VINT(k0)*Ps;
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
     n += 32;
-    k0 = shiftmod_REDC(k0, my_P, v);
+#else // D_NSTEP == 22
+    kpos = shiftmod_REDC21(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
+    n += 21;
+    //i = __ffsll(kpos)-1;
+    ALL_IF_CTZLL
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+
+    kpos = shiftmod_REDC42(k0, my_P, kPs);
+    TWIN_CHOOSE_EVEN
+    n += 21;
+    //i = __ffsll(kpos)-1;
+    ALL_IF_CTZLL
+
+    // Just flag this if kpos <= d_kmax.
+    ALL_FLAG_TEST
+    n += 22;
 #endif
+    // Proceed 64 N's to the next starting point.
+    k0 = onemod_REDC(my_P, kPs);
 #else
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
