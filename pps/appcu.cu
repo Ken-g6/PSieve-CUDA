@@ -763,7 +763,8 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 #endif
 
 #ifdef _DEVICEEMU
-#define PRINT_FACTOR_FOUND2(STAGE) //printf(STAGE "%lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
+#define PRINT_FACTOR_FOUND2(STAGE) //printf(STAGE "%lu | %u*2^%u+/-1 (P[%d])\n", my_P, (unsigned int)(kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x); \
+  printf("\tPrints only if %lu >= %lu, %u <(=) %u, and %u < %u\n", (kpos >> i), d_kmin, i, d_nstep, n+i, l_nmax);
 #define PRINT_FACTOR_FOUND(STAGE) PRINT_FACTOR_FOUND2(STAGE)
 #else
 #define PRINT_FACTOR_FOUND(STAGE)
@@ -792,7 +793,7 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
     if ((((unsigned int)(kpos>>32))>>i) == 0) \
       if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) { \
         PRINT_FACTOR_FOUND(STAGE) \
-        if((kpos>>i) >= d_kmin && i D_NSTEP_COMPARE d_nstep && n+i < l_nmax) my_factor_found |= 1; \
+        if((kpos>>i) >= d_kmin && i D_NSTEP_COMPARE d_nstep && n+i D_NSTEP_COMPARE l_nmax) my_factor_found |= 1; \
       }
 
 __device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
@@ -1223,7 +1224,7 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
   if(kmax < (((uint64_t)1)<<31) && ld_nstep <= 32) {
     if(ccapability[th].major >= 2
 #ifdef _DEVICEEMU
-        && ccapability[th].major != 9999
+        //&& ccapability[th].major != 9999
 #endif
 ) {
       // Use a Fermi kernel.
