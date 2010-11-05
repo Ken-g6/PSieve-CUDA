@@ -557,8 +557,8 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   if (status != CL_SUCCESS)  {
     fprintf(stderr, "Error: Building Program (clBuildProgram): %s\n", printable_cl_error(status));
     size_t len;
-    char buffer[2048];
-    clGetProgramBuildInfo(program, devices[deviceno], CL_PROGRAM_BUILD_LOG, sizeof(buffer), buffer, &len);
+    char buffer[16384];
+    clGetProgramBuildInfo(program, devices[deviceno], CL_PROGRAM_BUILD_LOG, 16384, buffer, &len);
     fprintf(stderr, "%s\n", buffer);
     return 1;
   }
@@ -585,6 +585,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
   }
 
+  printf("CL setup complete.\n");
   return 0;
 }
 
@@ -624,7 +625,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
   */
 
   // Allocate device arrays:
-  //printf("cthread_count = %u\n", cthread_count);
+  printf("cthread_count = %u\n", cthread_count);
   d_P = clCreateBuffer(context, CL_MEM_READ_ONLY, cthread_count*sizeof(cl_ulong), NULL, &status);
   if (status != CL_SUCCESS) {
     fprintf(stderr, "%sInsufficient available memory on GPU %d.\n", bmprefix(), gpuno);
@@ -704,13 +705,14 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
 // *** Host Kernel-calling functions ***
 
 // Pass the arguments to the CUDA device, run the code, and get the results.
-void check_ns(const uint64_t *P, const unsigned int cthread_count) {
+void check_ns(const uint64_t *P, const uint64_t *Ps, const uint64_t *k0, const unsigned int cthread_count) {
   //const unsigned int cblockcount = cthread_count/BLOCKSIZE;
   unsigned int n, shift, lastshift;
   unsigned int *this_n_subsection = first_n_subsection;
   // timing variables:
 
   // Pass P.
+  //printf("Writing %d P's.\n", cthread_count);
   //printf("Starting tests on P's starting with %lu\n", P[0]);
   //cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
   checkCUDAErr(clEnqueueWriteBuffer(commandQueue,
@@ -726,26 +728,63 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count) {
 
   /* Wait for the write buffer to finish execution */
   checkCUDAErr(clWaitForEvents(1, &comp_done_event), "Waiting for write buffer call to finish. (clWaitForEvents)");
-  // Let the loop release the event.
-  //checkCUDAErr(clReleaseEvent(dev_write_event), "Release event object. (clReleaseEvent)");
+  if(k0 != NULL) {
+    checkCUDAErr(clReleaseEvent(comp_done_event), "Release event object. (clReleaseEvent)");
+    //printf("Wrote P.\n");
+    // Pass k0 and Ps.
+    checkCUDAErr(clEnqueueWriteBuffer(commandQueue,
+          d_K,
+          CL_TRUE,
+          0,
+          cthread_count*sizeof(cl_ulong),
+          k0,
+          0,
+          NULL,
+          &comp_done_event)
+        ,"cudaMemcpy 2");
+
+    /* Wait for the write buffer to finish execution */
+    checkCUDAErr(clWaitForEvents(1, &comp_done_event), "Waiting for write buffer call to finish. (clWaitForEvents)");
+    checkCUDAErr(clReleaseEvent(comp_done_event), "Release event object. (clReleaseEvent)");
+    //printf("Wrote K.\n");
+    checkCUDAErr(clEnqueueWriteBuffer(commandQueue,
+          d_Ps,
+          CL_TRUE,
+          0,
+          cthread_count*sizeof(cl_ulong),
+          Ps,
+          0,
+          NULL,
+          &comp_done_event)
+        ,"cudaMemcpy 3");
+
+    /* Wait for the write buffer to finish execution */
+    checkCUDAErr(clWaitForEvents(1, &comp_done_event), "Waiting for write buffer call to finish. (clWaitForEvents)");
+    //printf("Wrote Ps.\n");
+  } else {
+    // Start the kernel that will calculate k0 and Ps.
+    // Let the loop release the event.
+    //checkCUDAErr(clReleaseEvent(comp_done_event), "Release event object. (clReleaseEvent)");
 
 #ifndef NDEBUG
-  bmsg("Setup successful...\n");
+    bmsg("Setup successful...\n");
 #endif
-  //printf("cthread_count now = %u\n", cthread_count);
-  checkCUDAErr(clEnqueueNDRangeKernel(commandQueue,
-        start_ns_kernel,
-        1,
-        NULL,
-        global_cthread_count,
-        NULL,
-        0,
-        NULL,
-        NULL),
-      "kernel invocation");
+    //printf("cthread_count now = %u\n", cthread_count);
+    checkCUDAErr(clEnqueueNDRangeKernel(commandQueue,
+          start_ns_kernel,
+          1,
+          NULL,
+          global_cthread_count,
+          NULL,
+          0,
+          NULL,
+          NULL),
+        "kernel invocation");
 #ifndef NDEBUG
-  bmsg("Main kernel successful...\n");
+    bmsg("Main kernel successful...\n");
 #endif
+  }
+
   lastshift = 2;  // Not 0 or 1.
   // Continue checking until nmax is reached.
   for(n = nmin; n < nmax; n += ld_kernel_nstep) {

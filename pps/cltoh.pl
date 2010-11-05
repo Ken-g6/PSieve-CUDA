@@ -32,6 +32,9 @@ while(<>) {
 		++$in_blockquote;
 	}
 
+	# Fix \'s not at the ends of lines.
+	s/\\(.)/\\\\$1/g;
+
 	# Remove (some) whitespace.
 	s/^[ 	]*//;
 	s/[ 	]*$//;

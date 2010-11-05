@@ -180,6 +180,18 @@ SHIFTMOD_REDCX(21)
 SHIFTMOD_REDCX(42)
 #endif
 
+// Same function, for a custom NSTEP.  step should be no bigger than NSTEP.
+VLONG shiftmod_REDCX (const VLONG a, const VLONG N, VLONG rax, const uint step) { \
+  VLONG rcx; \
+  rax = rax << (64-step); \
+  rcx = a >> step; \
+  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0)); \
+  rax = mad_hi(rax, N, rcx); \
+  rcx = rax - N; \
+  rax = (rax>N)?rcx:rax; \
+  return rax; \
+}
+
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
 VLONG
 invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
@@ -209,6 +221,54 @@ invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
 // *** KERNELS ***
 #define VLOAD VECSIZEIT(vload,VECSIZE)
 #define VSTORE VECSIZEIT(vstore,VECSIZE)
+// Set up to check N's by getting in position with division only.  Doesn't use the CPU for a powmod, but should only be used for small nmin.
+__kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
+                                 // Device constants
+                                 const ulong d_r0			// 4
+                                 ) {
+  uint n = D_NMIN; // = nmin;
+  uint i;
+  VLONG k0;
+  VLONG my_P, my_Ps;
+  i = get_global_id(0);
+  my_P = VLOAD(i, P); //P[i];
+
+  my_Ps = -invmod2pow_ul (my_P); // Ns = -N^{-1} % 2^64
+  // Might need to load this from the CPU, in case the bug is there.
+  //my_Ps = VLOAD(i, Ps)/* Ns = -N^{-1} % 2^64 */
+
+  // Calculate k0, in Montgomery form.
+  //k0 = invpowmod_REDClr(my_P, my_Ps, D_BBITS, d_r0);
+  while(n >= 128) {
+    k0 = mod_REDC(k0, my_P, my_Ps);
+    n -= 64;
+  }
+  if(n > 64) {
+    k0 = shiftmod_REDCX(k0, my_P, k0*my_Ps, n/2);
+    n -= n/2;
+  }
+  if(n > 0) {
+    k0 = shiftmod_REDCX(k0, my_P, k0*my_Ps, n);
+  }
+
+  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (GPU)\n", my_P, my_Ps);
+
+#ifdef D_SEARCH_PROTH
+  k0 = my_P-k0;
+#endif
+
+  //my_factor_found = 0;
+  //d_check_some_ns(my_P, my_Ps, k0, n, my_factor_found, i);
+
+  //i = get_global_id(0);
+  //factor_found_arr[i] = 0;
+  VSTORE(0, i, factor_found_arr);
+  //Ps[i] = my_Ps;
+  VSTORE(my_Ps, i, Ps);
+  //K[i] = k0;
+  VSTORE(k0, i, K);
+}
+/*
 // Start checking N's.
 __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
                                  // Device constants
@@ -222,7 +282,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
   my_P = VLOAD(i, P); //P[i];
 
   // Better get this done before the first mulmod.
-  my_Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+  my_Ps = -invmod2pow_ul (my_P); // Ns = -N^{-1} % 2^64
 
   // Calculate k0, in Montgomery form.
   k0 = invpowmod_REDClr(my_P, my_Ps, D_BBITS, d_r0);
@@ -244,6 +304,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
   //K[i] = k0;
   VSTORE(k0, i, K);
 }
+ */
 
 // Continue checking N's.
 //i=(__float_as_int(__VINT2float_rz(i & -i))>>23)-0x7f;
@@ -254,6 +315,14 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         I.X = (uint)(kpos.X>>32); \
         I.X=63u - clz (I.X & -I.X); \
       }
+
+#ifdef _DEVICEEMU
+//#define DEBUG_PRINT_RESULT2(X) printf("%lu | %lu*2^%u(+/-)1 (GPU)\n", my_P.X, (kpos.X >> v.X), n+v.X);
+//#define DEBUG_PRINT_RESULT(X) DEBUG_PRINT_RESULT2(X)
+#define DEBUG_PRINT_RESULT(X)
+#else
+#define DEBUG_PRINT_RESULT(X)
+#endif
 #ifdef SEARCH_TWIN
 #define NSTEP_COMP <= D_NSTEP
 #else
@@ -264,6 +333,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define VEC_FLAG_TEST(X) \
     if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
      if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
+      DEBUG_PRINT_RESULT(X) \
       if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
         my_factor_found.X |= 1; \
      } \
@@ -276,6 +346,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #endif
 #define VEC_FLAG_TEST(X) \
     if ((kpos.X >> v.X) <= d_kmax) { \
+      DEBUG_PRINT_RESULT(X) \
       if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
         my_factor_found.X |= 1; \
     }
@@ -350,8 +421,12 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   Ps = VLOAD(v.x, Psarr);
   k0 = VLOAD(v.x, K);
   my_P = VLOAD(v.x, P);
-  my_factor_found = VLOAD(v.x, factor_found_arr);
-  my_factor_found <<= shift;
+  if(n == D_NMIN) {
+    my_factor_found = (VINT)VECTORIZE(0);
+  } else {
+    my_factor_found = VLOAD(v.x, factor_found_arr);
+    my_factor_found <<= shift;
+  }
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif

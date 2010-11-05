@@ -103,6 +103,8 @@ int *check_ns_delay;
 static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
 #ifdef USE_OPENCL
+static uint64_t** ld_k0;
+static uint64_t** ld_Ps;
 static unsigned int** factor_found;
 #else
 static unsigned char** factor_found;
@@ -767,6 +769,16 @@ void app_init(void)
   }
   bitsmask--; // Finalize bitsmask.
   */
+  // Allocate k0 and Ps arrays
+#ifdef USE_OPENCL
+  if(nmin > 1) {
+    ld_k0 = xmalloc(num_threads*sizeof(uint64_t*));
+    ld_Ps = xmalloc(num_threads*sizeof(uint64_t*));
+  } else {
+    ld_k0 = ld_Ps = NULL;
+  }
+#endif
+
   // Allocate check_ns_delay;
   check_ns_delay = xmalloc(num_threads*sizeof(int));
   for(i=0; i < (unsigned int)num_threads; i++) check_ns_delay[i] = 0;
@@ -817,6 +829,14 @@ unsigned int app_thread_init(int th)
     r0arr[i] = ((uint64_t)1) << (64-(n >> (l_bbits-5)));
     //printf("r0arr[%d] = %lu\n", n, r0arr[i]);
   }
+
+  // Allocate k0 and Ps arrays if necessary
+#ifdef USE_OPENCL
+  if(ld_k0 != NULL) {
+    ld_k0[th] = xmalloc(cthread_count*sizeof(uint64_t));
+    ld_Ps[th] = xmalloc(cthread_count*sizeof(uint64_t));
+  }
+#endif
 
   // Allocate the factor_found arrays.
   if(cthread_count > 0) {
@@ -1129,6 +1149,29 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
   unsigned int i;
   uint64_t new_start_time;
 
+#ifdef USE_OPENCL
+  // If necessary, compute Ps and k0 here.
+  if(ld_k0 != NULL) {
+    //printf("Setting up k0/Ps arrays.\n");
+    if(search_proth) {
+      for(i=0; i < cthread_count; i++) {
+        uint64_t my_P = P[i];
+        uint64_t Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+        ld_Ps[th][i] = Ps;
+        ld_k0[th][i] = my_P-invpowmod_REDClr(my_P, Ps, nmin, ld_r0, ld_bbits);
+      }
+    } else {
+      for(i=0; i < cthread_count; i++) {
+        uint64_t my_P = P[i];
+        uint64_t Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
+        ld_Ps[th][i] = Ps;
+        ld_k0[th][i] = invpowmod_REDClr(my_P, Ps, nmin, ld_r0, ld_bbits);
+      }
+    }
+    //printf("Done setting up k0/Ps arrays.\n");
+  }
+#endif
+
   // If there was a kernel running, get its results first.
   if(gpu_started[th] != (uint64_t)0) {
     //printf("Getting factors from iteration at %d\n", gpu_started[th]);
@@ -1136,7 +1179,11 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
   }
 
   // Start the next kernel.
+#ifdef USE_OPENCL
+  check_ns(P, ld_Ps[th], ld_k0[th], cthread_count);
+#else
   check_ns(P, cthread_count);
+#endif
   new_start_time = elapsed_usec();
   //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
 

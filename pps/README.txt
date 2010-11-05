@@ -23,10 +23,8 @@ ppsieve-######### 	The executable.  Pick the right one for your OS and CPU.
 
 -f       output factorfile (this one you shall upload when range is completed)
 
--t4      Only multi-GPU systems.  -tN will spread the work of the sieve over
-         N cores. Although it may be a little
-         LESS productive, it's easier to manage. 
-         
+-d       Select the GPU you want to use, by number, starting from 0.
+
 -q       quiet mode
 
 Default is not to change process priority.
@@ -35,11 +33,7 @@ Default is not to change process priority.
 This is far from finished. Run `./ppsieve -h' for a list of options.
 
 Options can be given default values in a configuration file and overridden
-on the command line. E.g. to start 2 threads for two GPUs, add this line to
-ppconfig.txt:
-
-  threads=2
-
+on the command line.
 
 Integer arguments to config file or command line options can be given using
 this shorthand: K=10^3, M=10^6, G=10^9, T=10^12, P=10^15, or k=2^10, m=2^20,
@@ -48,7 +42,7 @@ any of: 1M, 1000K, 1000000, 1e6, 10e5, etc.
 
 "This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
+the Free Software Foundation; either version 3 of the License, or
 (at your option) any later version."
 
 Source code should be found at http://sites.google.com/site/kenscode/
