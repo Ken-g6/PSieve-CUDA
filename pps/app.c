@@ -1152,8 +1152,9 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
 #ifdef USE_OPENCL
   // If necessary, compute Ps and k0 here.
   if(ld_k0 != NULL) {
-    //printf("Setting up k0/Ps arrays.\n");
-    if(search_proth) {
+#ifndef SEARCH_TWIN
+    if(search_proth == 1) {
+      //printf("Setting up Proth k0/Ps arrays.\n");
       for(i=0; i < cthread_count; i++) {
         uint64_t my_P = P[i];
         uint64_t Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
@@ -1161,13 +1162,17 @@ void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned i
         ld_k0[th][i] = my_P-invpowmod_REDClr(my_P, Ps, nmin, ld_r0, ld_bbits);
       }
     } else {
+#endif
+      //printf("Setting up Riesel k0/Ps arrays.\n");
       for(i=0; i < cthread_count; i++) {
         uint64_t my_P = P[i];
         uint64_t Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
         ld_Ps[th][i] = Ps;
         ld_k0[th][i] = invpowmod_REDClr(my_P, Ps, nmin, ld_r0, ld_bbits);
       }
+#ifndef SEARCH_TWIN
     }
+#endif
     //printf("Done setting up k0/Ps arrays.\n");
   }
 #endif
