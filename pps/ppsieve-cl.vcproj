@@ -50,7 +50,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;NDEBUG;_REENTRANT;TRACE"
+				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;NDEBUG;_REENTRANT;TRACE;_DEVICEEMU"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
@@ -455,7 +455,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;SEARCH_TWIN"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;SEARCH_TWIN;USE_OPENCL"
 				RuntimeLibrary="2"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
@@ -473,8 +473,8 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib cuda.lib"
-				OutputFile="$(OutDir)\tpsieve-cuda-x86-windows.exe"
+				AdditionalDependencies="OpenCL.lib"
+				OutputFile="$(OutDir)\tpsieve-cl-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
 				GenerateDebugInformation="true"
