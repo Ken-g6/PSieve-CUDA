@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 10.00
 # Visual C++ Express 2008
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ppsieve-cuda", "pps\ppsieve-cuda.vcproj", "{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ppsieve-cl", "pps\ppsieve-cl.vcproj", "{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -9,6 +9,7 @@ Global
 		BOINC-Release|Win32 = BOINC-Release|Win32
 		Debug|Win32 = Debug|Win32
 		Release|Win32 = Release|Win32
+		TPS-BOINC-Release|Win32 = TPS-BOINC-Release|Win32
 		TPS-Release|Win32 = TPS-Release|Win32
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
@@ -20,6 +21,8 @@ Global
 		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Debug|Win32.Build.0 = Debug|Win32
 		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Release|Win32.ActiveCfg = Release|Win32
 		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.Release|Win32.Build.0 = Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-BOINC-Release|Win32.ActiveCfg = TPS-BOINC-Release|Win32
+		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-BOINC-Release|Win32.Build.0 = TPS-BOINC-Release|Win32
 		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-Release|Win32.ActiveCfg = TPS-Release|Win32
 		{5970FA71-0711-47BE-A72A-45C61FB4FB12}.TPS-Release|Win32.Build.0 = TPS-Release|Win32
 	EndGlobalSection
