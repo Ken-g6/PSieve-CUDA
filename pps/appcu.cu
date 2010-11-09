@@ -1207,8 +1207,10 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
   // timing variables:
 
   // Pass P.
-  cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
-  checkCUDAErr("cudaMemcpy");
+  if(P != NULL) {
+    cudaMemcpy(d_P, P, cthread_count*sizeof(uint64_t), cudaMemcpyHostToDevice);
+    checkCUDAErr("cudaMemcpy");
+  }
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
@@ -1255,8 +1257,26 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
 }
 
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
+#ifdef USE_BOINC
+  cudaError_t err;
+  int count = 0;
+#endif
   // Get d_factor_found, into the thread'th factor_found array.
   cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+#ifdef USE_BOINC
+  err = cudaGetLastError();
+  while(err == 1 && count < 4) {
+    fprintf(stderr, "Warning: A kernel failed.  Retry %d.\n", count+1);
+    // Retry the computation.  BOINC-only because we can't be sure the thread is 0 otherwise.
+    // This could be corrected by passing more arguments into this function.
+    check_ns(NULL, cthread_count, 0);
+    count++;
+    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    err = cudaGetLastError();
+  }
+#endif
+    
+    
   checkCUDAErr("getting factors found");
   cudaEventRecord(stop, stream);
   checkCUDAErr("cudaEventRecord");
