@@ -18,7 +18,7 @@
 #ifndef USE_OPENCL
 #define APP_VERSION "cuda-0.2.1a"
 #else
-#define APP_VERSION "cl-0.2.3"
+#define APP_VERSION "cl-0.2.3a"
 #endif
 
 #ifdef SEARCH_TWIN
@@ -43,7 +43,7 @@
 
 // Add Riesel if not SEARCH_TWIN
 #ifdef SEARCH_TWIN
-#define APP_SHORT_OPTS_TWINCOND APP_SHORT_OPTS_BASE
+#define APP_SHORT_OPTS_TWINCOND APP_SHORT_OPTS_BASE "T"
 #else
 #define APP_SHORT_OPTS_TWINCOND APP_SHORT_OPTS_BASE "R"
 #endif

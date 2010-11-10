@@ -324,9 +324,9 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define DEBUG_PRINT_RESULT(X)
 #endif
 #ifdef SEARCH_TWIN
-#define NSTEP_COMP <= D_NSTEP
+#define NSTEP_COMP <=
 #else
-#define NSTEP_COMP < D_NSTEP
+#define NSTEP_COMP <
 #endif
     // Just flag this if kpos <= d_kmax.
 #ifdef D_KMAX
@@ -334,7 +334,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
     if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
      if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
       DEBUG_PRINT_RESULT(X) \
-      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
+      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
         my_factor_found.X |= 1; \
      } \
     }
@@ -347,7 +347,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define VEC_FLAG_TEST(X) \
     if ((kpos.X >> v.X) <= d_kmax) { \
       DEBUG_PRINT_RESULT(X) \
-      if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP && n+v.X < l_nmax) \
+      if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
         my_factor_found.X |= 1; \
     }
 #endif

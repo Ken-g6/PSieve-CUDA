@@ -1257,11 +1257,16 @@ int app_read_checkpoint(FILE *fin)
 {
   unsigned int n0, n1;
 
-  if (fscanf(fin,"nmin=%u,nmax=%u,factor_count=%u",&n0,&n1,&factor_count) != 3)
+  if (fscanf(fin,"nmin=%u,nmax=%u,factor_count=%u",&n0,&n1,&factor_count) != 3) {
+    bmsg("Failed to read checkpoint file data!\n");
     return 0;
+  }
 
-  if (n0 != nmin || n1 != nmax)
+  if (n0 != nmin || n1 != nmax) {
+    fprintf(stderr, "Checkpoint file searches %u-%u, but should search %u-%u!\n", n0, n1, nmin, nmax);
+    factor_count = 0;
     return 0;
+  }
 
   return 1;
 }
@@ -1281,7 +1286,11 @@ int app_read_checkpoint(FILE *fin)
 void app_write_checkpoint(FILE *fout)
 {
   fflush(factors_file);
+#if defined(USE_OPENCL) && defined(SEARCH_TWIN)
+  fprintf(fout,"nmin=%u,nmax=%u,factor_count=%u\n",nmin+1,nmax,factor_count);
+#else
   fprintf(fout,"nmin=%u,nmax=%u,factor_count=%u\n",nmin,nmax,factor_count);
+#endif
 }
 
 /* This function is called once after all threads have exited.

@@ -361,7 +361,9 @@ static uint64_t read_checkpoint(void)
   }
   else
   {
-    fprintf(stderr,"%sIgnoring invalid checkpoint in %s\n", bmprefix(), cpf);
+    fprintf(stderr,"%sIgnoring invalid checkpoint in %s", bmprefix(), cpf);
+    if(!valid) fprintf(stderr, " because it couldn't be read.\n");
+    else fprintf(stderr, " because the checksum failed.\n");
     return pmin;
   }
 }
