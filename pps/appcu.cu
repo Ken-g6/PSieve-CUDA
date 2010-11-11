@@ -182,7 +182,11 @@ void cuda_init(void) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
   } else {
+#ifdef SEARCH_TWIN
+    printf("Changed nstep to %u\n", ld_nstep);
+#else
     printf("Didn't change nstep from %u\n", ld_nstep);
+#endif
   }
 
   ld_bbits = lg2(nmin);
