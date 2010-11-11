@@ -341,6 +341,14 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
       if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
         my_factor_found.X |= 1; \
     }
+#define VEC_FAST_FLAG_TEST(X) \
+  if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
+    if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
+      DEBUG_PRINT_RESULT(X) \
+      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
+        my_factor_found.X |= 1; \
+    } \
+  }
 #else
 #ifdef D_KMIN
 #define THE_KMIN D_KMIN
@@ -353,6 +361,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
       if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
         my_factor_found.X |= 1; \
     }
+#define VEC_FAST_FLAG_TEST(X) VEC_FLAG_TEST(X)
 #endif
 #if(VECSIZE == 2)
 #define ALL_CTZLL \
@@ -361,6 +370,9 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define ALL_FLAG_TEST \
       VEC_FLAG_TEST(x) \
       VEC_FLAG_TEST(y)
+#define ALL_FAST_FLAG_TEST \
+      VEC_FAST_FLAG_TEST(x) \
+      VEC_FAST_FLAG_TEST(y)
 #define VEC_IF if(v.x == 0 || v.y == 0)
 #elif(VECSIZE == 4)
 #define ALL_CTZLL \
@@ -373,6 +385,11 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
       VEC_FLAG_TEST(y) \
       VEC_FLAG_TEST(z) \
       VEC_FLAG_TEST(w)
+#define ALL_FAST_FLAG_TEST \
+      VEC_FAST_FLAG_TEST(x) \
+      VEC_FAST_FLAG_TEST(y) \
+      VEC_FAST_FLAG_TEST(z) \
+      VEC_FAST_FLAG_TEST(w)
 #define VEC_IF if(v.x == 0 || v.y == 0 || v.z == 0 || v.w == 0)
 #else
 #error "Invalid vecsize" #VECSIZE
@@ -383,8 +400,10 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
     v = V2VINT(kpos); \
     VEC_IF { \
       ALL_CTZLL \
+      ALL_FLAG_TEST \
     } else { \
       v=31u - clz (v & -v); \
+      ALL_FAST_FLAG_TEST \
     }
 
 #ifdef SEARCH_TWIN
@@ -441,10 +460,8 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
 #endif
     TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
-    ALL_IF_CTZLL
-
     // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
+    ALL_IF_CTZLL
 
 #if D_NSTEP == 32 || D_NSTEP == 22
 #if D_NSTEP == 32
@@ -452,29 +469,25 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     kpos = shiftmod_REDC(k0, my_P, kPs);
     TWIN_CHOOSE_EVEN
     //i = __ffsll(kpos)-1;
+    // Just flag this if kpos <= d_kmax.
     ALL_IF_CTZLL
 
-    // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
     n += 32;
 #else // D_NSTEP == 22
     kpos = shiftmod_REDC21(k0, my_P, kPs);
     TWIN_CHOOSE_EVEN
     n += 21;
     //i = __ffsll(kpos)-1;
-    ALL_IF_CTZLL
-
     // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
+    ALL_IF_CTZLL
 
     kpos = shiftmod_REDC42(k0, my_P, kPs);
     TWIN_CHOOSE_EVEN
     n += 21;
     //i = __ffsll(kpos)-1;
+    // Just flag this if kpos <= d_kmax.
     ALL_IF_CTZLL
 
-    // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
     n += 22;
 #endif
     // Proceed 64 N's to the next starting point.
