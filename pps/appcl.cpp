@@ -438,7 +438,11 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     if(ld_nstep != 22) printf("nstep changed to 22\n");
     ld_nstep = 22;
   } else {
+#ifdef SEARCH_TWIN
+    printf("Changed nstep to %u\n", ld_nstep);
+#else
     printf("Didn't change nstep from %u\n", ld_nstep);
+#endif
   }
 
   // N's to search each time a kernel is run:
