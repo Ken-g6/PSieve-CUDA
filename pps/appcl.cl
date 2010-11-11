@@ -309,17 +309,22 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 // Continue checking N's.
 //i=(__float_as_int(__VINT2float_rz(i & -i))>>23)-0x7f;
 #define VEC_CTZLL(I,X) \
-        if(I.X != 0) { \
-          I.X=31u - clz (I.X & -I.X); \
+      if(I.X != 0) { \
+        I.X=31u - clz (I.X & -I.X); \
       } else { \
         I.X = (uint)(kpos.X>>32); \
         I.X=63u - clz (I.X & -I.X); \
       }
 
+#ifdef SEARCH_TWIN
+#define GPUNAME "TPS GPU"
+#else
+#define GPUNAME "PPS GPU"
+#endif
 #ifdef _DEVICEEMU
-//#define DEBUG_PRINT_RESULT2(X) printf("%lu | %lu*2^%u(+/-)1 (GPU)\n", my_P.X, (kpos.X >> v.X), n+v.X);
-//#define DEBUG_PRINT_RESULT(X) DEBUG_PRINT_RESULT2(X)
-#define DEBUG_PRINT_RESULT(X)
+#define DEBUG_PRINT_RESULT2(X) printf("%lu | %lu*2^%u(+/-)1 (%s)\n", my_P.X, (kpos.X >> v.X), n+v.X, GPUNAME);
+#define DEBUG_PRINT_RESULT(X) DEBUG_PRINT_RESULT2(X)
+//#define DEBUG_PRINT_RESULT(X)
 #else
 #define DEBUG_PRINT_RESULT(X)
 #endif
@@ -331,12 +336,10 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
     // Just flag this if kpos <= d_kmax.
 #ifdef D_KMAX
 #define VEC_FLAG_TEST(X) \
-    if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
-     if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
+    if ((kpos.X >> v.X) <= D_KMAX) { \
       DEBUG_PRINT_RESULT(X) \
       if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
         my_factor_found.X |= 1; \
-     } \
     }
 #else
 #ifdef D_KMIN
