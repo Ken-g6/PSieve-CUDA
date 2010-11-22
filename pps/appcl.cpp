@@ -11,11 +11,19 @@
 
 #include <stdio.h>
 #include "stdint.h"
-#include <string.h>
+#ifdef __APPLE__
+  #include <string>
+#else
+  #include <string.h>
+#endif
 #include "inttypes.h"
 #include <utility>
 #define __NO_STD_VECTOR
-#include <CL/cl.hpp>
+#ifdef __APPLE__
+  #include <OpenCL/cl.h>
+#else
+  #include <CL/cl.hpp>
+#endif
 #include "main.h"
 #include "putil.h"
 #include "app.h"

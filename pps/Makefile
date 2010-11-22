@@ -1,3 +1,5 @@
+# Build Linux apps by default, set PLATFORM=mac for Mac build
+PLATFORM ?= linux
 TPS_APPNAME = tpsieve-cuda
 APPNAME = ppsieve-cuda
 CL_APPNAME = ppsieve-cl
@@ -37,24 +39,41 @@ BOINC_TPSOBJS64 = ../do_boinc_init64.o ../tpmain_boinc64.o ../putil_boinc64.o ..
 CL_BOINC_TPSOBJS64 = ../do_boinc_init64.o ../tpmain_boinc64.o ../putil_boinc64.o ../sieve_boinc64.o cl_tpapp_boinc64.o tpappcl64.o $(COMMON64_OBJS)
 
 # Bins
-BOINC_BINS = $(APPNAME)-boinc-x86-linux $(APPNAME)-boinc-x86_64-linux
-NON_BOINC_BINS = $(APPNAME)-x86-linux $(APPNAME)-x86_64-linux
-CL_BOINC_BINS = $(CL_APPNAME)-boinc-x86-linux $(CL_APPNAME)-boinc-x86_64-linux $(CL_TPS_APPNAME)-boinc-x86-linux $(CL_TPS_APPNAME)-boinc-x86_64-linux
-CL_NON_BOINC_BINS = $(CL_APPNAME)-x86-linux $(CL_APPNAME)-x86_64-linux $(CL_TPS_APPNAME)-x86-linux $(CL_TPS_APPNAME)-x86_64-linux
+BOINC_BINS = $(APPNAME)-boinc-x86-$(PLATFORM) $(APPNAME)-boinc-x86_64-$(PLATFORM)
+NON_BOINC_BINS = $(APPNAME)-x86-$(PLATFORM) $(APPNAME)-x86_64-$(PLATFORM)
+CL_BOINC_BINS = $(CL_APPNAME)-boinc-x86-$(PLATFORM) $(CL_APPNAME)-boinc-x86_64-$(PLATFORM) $(CL_TPS_APPNAME)-boinc-x86-$(PLATFORM) $(CL_TPS_APPNAME)-boinc-x86_64-$(PLATFORM)
+CL_NON_BOINC_BINS = $(CL_APPNAME)-x86-$(PLATFORM) $(CL_APPNAME)-x86_64-$(PLATFORM) $(CL_TPS_APPNAME)-x86-$(PLATFORM) $(CL_TPS_APPNAME)-x86_64-$(PLATFORM)
 # BINS should also have $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86-windows.exe, but those can't be made on Linux. (Yet.)
 BINS = $(NON_BOINC_BINS) $(BOINC_BINS)
 CL_BINS = $(CL_NON_BOINC_BINS) $(CL_BOINC_BINS)
-TPS_BINS = $(TPS_APPNAME)-x86-linux $(TPS_APPNAME)-x86_64-linux 
-TPS_BOINC_BINS = $(TPS_APPNAME)-boinc-x86-linux $(TPS_APPNAME)-boinc-x86_64-linux 
+TPS_BINS = $(TPS_APPNAME)-x86-$(PLATFORM) $(TPS_APPNAME)-x86_64-$(PLATFORM) 
+TPS_BOINC_BINS = $(TPS_APPNAME)-boinc-x86-$(PLATFORM) $(TPS_APPNAME)-boinc-x86_64-$(PLATFORM) 
 
-CC = gcc
-CC32 = $(CC) -c -m32 -march=i586 -mtune=core2
-CC64 = $(CC) -c -m64 -march=k8 -mno-3dnow -mtune=core2
-NVCC = nvcc
-CL_DEFINE = -DUSE_OPENCL
-CL_INCLUDE = -I $(ATISTREAMSDKROOT)/include
-CL32 = $(CXX) -c -m32 -march=i586 -mtune=core2 $(CL_INCLUDE)
-CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
+ifeq ($(PLATFORM),linux)
+  CC = gcc
+  CC32 = $(CC) -c -m32 -march=i586 -mtune=core2
+  CC64 = $(CC) -c -m64 -march=k8 -mno-3dnow -mtune=core2
+  NVCC = nvcc
+  CL_DEFINE = -DUSE_OPENCL
+  CL_INCLUDE = -I $(ATISTREAMSDKROOT)/include
+  CL32 = $(CXX) -c -m32 -march=i586 -mtune=core2 $(CL_INCLUDE)
+  CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
+else ifeq ($(PLATFORM),mac)
+  TARGET_OS = MACOSX_DEPLOYMENT_TARGET=10.6
+  MACOS_MIN_VERSION = -mmacosx-version-min=10.6
+  ISYSROOT = -isysroot /Developer/SDKs/MacOSX10.6.sdk
+  CC = $(TARGET_OS) gcc
+  CC32 = $(CC) -c -arch i386
+  CC64 = $(CC) -c -arch x86_64
+  NVCC = $(TARGET_OS) nvcc
+  LD32 = $(CC) -arch i386
+  LD64 = $(CC) -arch x86_64
+  CL_DEFINE = -DUSE_OPENCL
+  CL_INCLUDE = -framework OpenCL
+  CL32 = $(CXX) -c -arch i386 $(CL_INCLUDE)
+  CL64 = $(CXX) -c -arch x86_64 $(CL_INCLUDE)
+endif
+ 
 
 # Flags:
 # Uncomment to use device emulation:
@@ -66,6 +85,15 @@ NVCFLAGS = --ptxas-options=-v $(DOEMU) $(COMMON_FLAGS)
 LINK = -lm -lpthread # -lcuda
 CL_LINK = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86
 CL_LINK64 = -lOpenCL -L$(ATISTREAMSDKROOT)/lib/x86_64
+
+ifeq ($(PLATFORM),mac)
+  COMMON_FLAGS += -D_GNU_SOURCE
+  CFLAGS += $(MACOS_MIN_VERSION) $(ISYSROOT)
+  NVCFLAGS += -arch=sm_11
+  LINK += $(ISYSROOT) -L/usr/local/cuda/lib -lcuda -lcudart -lstdc++
+  CL_LINK = -framework OpenCL
+  CL_LINK64 = $(CL_LINK)
+endif
 
 # Uncomment this line if BOINC is in a user-specified directory.
 #BOINC_DIR = /downloads/distributed/boinc610/server_stable
@@ -81,9 +109,15 @@ endif
 BOINC_CFLAGS = -DUSE_BOINC $(CFLAGS) $(BOINC_LOAD_LIBS)
 BOINC_NVCFLAGS = -DUSE_BOINC $(NVCFLAGS) $(BOINC_LOAD_LIBS)
 
-BOINC_LINK64 = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
-BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
-#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-linux $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+ifeq ($(PLATFORM),linux)
+  BOINC_LINK64 = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+  BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+else ifeq ($(PLATFORM),mac)
+  BOINC_LINK64 = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc -DAPP_GRAPHICS
+  BOINC_LINK = $(BOINC_LINK64)
+endif
+
+#nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-$(PLATFORM) $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 
 # Make-able targets:
 all: $(BINS) cl tps
@@ -94,10 +128,10 @@ cl: appcl.h $(CL_BINS)
 zips: $(APPNAME).zip $(TPS_APPNAME).zip $(APPNAME)-src.zip
 
 $(TPS_APPNAME).zip: $(TPS_BINS) $(TPS_BOINC_BINS) gitstatus changes
-	-rm $@ ; zip -9 $(TPS_APPNAME).zip $(TPS_APPNAME)-x86-linux $(TPS_APPNAME)-boinc-x86-linux $(TPS_APPNAME)-x86_64-linux $(TPS_APPNAME)-boinc-x86_64-linux $(TPS_APPNAME)-boinc-x86-windows.exe $(TPS_APPNAME)-x86-windows.exe $(TPS_APPNAME)-boinc-x86_64-windows.exe $(TPS_APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(TPS_APPNAME).sh $(TPS_APPNAME).bat *config.txt license.txt
+	-rm $@ ; zip -9 $(TPS_APPNAME).zip $(TPS_APPNAME)-x86-$(PLATFORM) $(TPS_APPNAME)-boinc-x86-$(PLATFORM) $(TPS_APPNAME)-x86_64-$(PLATFORM) $(TPS_APPNAME)-boinc-x86_64-$(PLATFORM) $(TPS_APPNAME)-boinc-x86-windows.exe $(TPS_APPNAME)-x86-windows.exe $(TPS_APPNAME)-boinc-x86_64-windows.exe $(TPS_APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(TPS_APPNAME).sh $(TPS_APPNAME).bat *config.txt license.txt
 
 $(APPNAME).zip: $(BINS) gitstatus changes
-	-rm $@ ; zip -9 $(APPNAME).zip $(APPNAME)-x86-linux $(APPNAME)-boinc-x86-linux $(APPNAME)-x86_64-linux $(APPNAME)-boinc-x86_64-linux $(APPNAME)-boinc-x86-windows.exe $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86_64-windows.exe $(APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(APPNAME).sh $(APPNAME).bat *config.txt license.txt
+	-rm $@ ; zip -9 $(APPNAME).zip $(APPNAME)-x86-$(PLATFORM) $(APPNAME)-boinc-x86-$(PLATFORM) $(APPNAME)-x86_64-$(PLATFORM) $(APPNAME)-boinc-x86_64-$(PLATFORM) $(APPNAME)-boinc-x86-windows.exe $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86_64-windows.exe $(APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(APPNAME).sh $(APPNAME).bat *config.txt license.txt
 
 $(APPNAME)-src.zip: $(BINS) gitstatus changes
 	-rm $@ ; cd .. ; zip -9 $(APPPATH)/$(APPNAME)-src.zip Makefile $(APPPATH)/Makefile *.txt *.[ch] *.cpp *.sln $(APPPATH)/*.[ch] $(APPPATH)/*.cu $(APPPATH)/README.txt $(APPPATH)/CHANGES.txt $(APPPATH)/*config.txt $(APPPATH)/make-*.sh $(APPPATH)/$(APPNAME).sh $(APPPATH)/*.bat vc/*
@@ -120,52 +154,52 @@ boinc: $(BOINC_BINS) $(TPS_BOINC_BINS)
 clean:
 	-rm *.o ../*.o appcl.h $(BINS) $(CL_BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
 
-$(APPNAME)-x86-linux: $(CUDA_OBJS)
+$(APPNAME)-x86-$(PLATFORM): $(CUDA_OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)
 
-$(APPNAME)-boinc-x86-linux: $(CUDA_BOINC_OBJS)
+$(APPNAME)-boinc-x86-$(PLATFORM): $(CUDA_BOINC_OBJS)
 	$(NVCC) -m32 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK)
 
-$(TPS_APPNAME)-x86-linux: $(TPSOBJS)
+$(TPS_APPNAME)-x86-$(PLATFORM): $(TPSOBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
 
-$(TPS_APPNAME)-boinc-x86-linux: $(BOINC_TPSOBJS)
+$(TPS_APPNAME)-boinc-x86-$(PLATFORM): $(BOINC_TPSOBJS)
 	$(NVCC) -m32 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK) -DSEARCH_TWIN
 
-$(APPNAME)-x86_64-linux: $(CUDA_OBJS64)
+$(APPNAME)-x86_64-$(PLATFORM): $(CUDA_OBJS64)
 	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK)
 
-$(APPNAME)-boinc-x86_64-linux: $(CUDA_BOINC_OBJS64)
+$(APPNAME)-boinc-x86_64-$(PLATFORM): $(CUDA_BOINC_OBJS64)
 	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC_LINK64)
 
-$(TPS_APPNAME)-x86_64-linux: $(TPSOBJS64)
+$(TPS_APPNAME)-x86_64-$(PLATFORM): $(TPSOBJS64)
 	$(NVCC) -m64 -o $@ $(NVCFLAGS) $^ $(LINK) -DSEARCH_TWIN
 
-$(TPS_APPNAME)-boinc-x86_64-linux: $(BOINC_TPSOBJS64)
+$(TPS_APPNAME)-boinc-x86_64-$(PLATFORM): $(BOINC_TPSOBJS64)
 	$(NVCC) -m64 -o $@ $(BOINC_NVCFLAGS) $^ $(BOINC64_LINK) -DSEARCH_TWIN
 
-$(CL_APPNAME)-x86-linux: $(CL_OBJS)
+$(CL_APPNAME)-x86-$(PLATFORM): $(CL_OBJS)
 	$(CXX) -m32 -o $@ $(CFLAGS) $^ $(CL_LINK) $(LINK)
 
-$(CL_APPNAME)-boinc-x86-linux: $(CL_BOINC_OBJS)
+$(CL_APPNAME)-boinc-x86-$(PLATFORM): $(CL_BOINC_OBJS)
 	$(CXX) -m32 -o $@ $(BOINC_CFLAGS) $^ $(CL_LINK) $(BOINC_LINK)
 
-$(CL_TPS_APPNAME)-x86-linux: $(CL_TPSOBJS)
+$(CL_TPS_APPNAME)-x86-$(PLATFORM): $(CL_TPSOBJS)
 	$(CXX) -m32 -o $@ $(CFLAGS) $^ $(CL_LINK) $(LINK) -DSEARCH_TWIN
 
-$(CL_TPS_APPNAME)-boinc-x86-linux: $(CL_BOINC_TPSOBJS)
+$(CL_TPS_APPNAME)-boinc-x86-$(PLATFORM): $(CL_BOINC_TPSOBJS)
 	$(CXX) -m32 -o $@ $(BOINC_CFLAGS) $^ $(CL_LINK) $(BOINC_LINK) -DSEARCH_TWIN
 
-$(CL_APPNAME)-x86_64-linux: $(CL_OBJS64)
+$(CL_APPNAME)-x86_64-$(PLATFORM): $(CL_OBJS64)
 	$(CXX) -m64 -o $@ $(CFLAGS) $^ $(CL_LINK64) $(LINK)
 
-$(CL_APPNAME)-boinc-x86_64-linux: $(CL_BOINC_OBJS64)
+$(CL_APPNAME)-boinc-x86_64-$(PLATFORM): $(CL_BOINC_OBJS64)
 	$(CXX) -m64 -o $@ $(BOINC_CFLAGS) $^ $(CL_LINK64) $(BOINC_LINK64)
 
-$(CL_TPS_APPNAME)-x86_64-linux: $(CL_TPSOBJS64)
+$(CL_TPS_APPNAME)-x86_64-$(PLATFORM): $(CL_TPSOBJS64)
 	$(CXX) -m64 -o $@ $(CFLAGS) $^ $(CL_LINK64) $(LINK) -DSEARCH_TWIN
 
-$(CL_TPS_APPNAME)-boinc-x86_64-linux: $(CL_BOINC_TPSOBJS64)
+$(CL_TPS_APPNAME)-boinc-x86_64-$(PLATFORM): $(CL_BOINC_TPSOBJS64)
 	$(CXX) -m64 -o $@ $(BOINC_CFLAGS) $^ $(CL_LINK64) $(BOINC_LINK64) -DSEARCH_TWIN
 
 # OBJS
