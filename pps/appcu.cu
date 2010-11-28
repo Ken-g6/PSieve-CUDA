@@ -258,7 +258,7 @@ unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count)
   if(cthread_count == 0) {
     // Threads per multiprocessor, based on compute capability, if not manually set.
     cthread_count = (gpuprop->major == 1 && gpuprop->minor < 2)?384:768;
-    if(gpuprop->major >= 2) cthread_count = 1024*2;
+    if(gpuprop->major >= 2) cthread_count = 1024; // *2
   } else {
     if(cthread_count < BLOCKSIZE) cthread_count *= BLOCKSIZE;
     else cthread_count -= cthread_count % BLOCKSIZE;
