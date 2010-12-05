@@ -72,6 +72,7 @@ unsigned char *d_factor_found;
 // Timing variables:
 //const int setup_ps_overlap = 5000;
 const int check_ns_overlap = 50000;
+bool blocking_sync_ok=true;
 
 static unsigned int *thread_kernel_nstep;
 static struct cudaDeviceProp *ccapability;
@@ -79,8 +80,8 @@ static int max_ns_delay = 0;
 //static int ccapability = 1;
 
 //globals for cuda
-cudaEvent_t stop;
-cudaStream_t stream;
+//cudaEvent_t stop;
+//cudaStream_t stream = NULL;
 
 // A getter for n_subsection_start.  Yes, in C!
 //int get_n_subsection_start(int index) { return n_subsection_start[index]; }
@@ -112,12 +113,12 @@ void cuda_finalize(void) {
   if(d_factor_found){
     cudaFree(d_factor_found);
   }
-  if(stop){
-    cudaEventDestroy(stop);
-  }
-  if(stream){
-    cudaStreamDestroy(stream);
-  }
+  //if(stop){
+    //cudaEventDestroy(stop);
+  //}
+  //if(stream){
+    //cudaStreamDestroy(stream);
+  //}
 }
 
 void checkCUDAErr(const char* msg) {
@@ -218,7 +219,6 @@ unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count)
   //unsigned int ld_bitsmask;
   //unsigned int ld_bpernstep;
   //unsigned int cthread_count;
-  bool blocking_sync_ok=true;
 
   // Find the GPU's properties.
   if(cudaGetDeviceProperties(&ccapability[th], gpuno) != cudaSuccess) {
@@ -258,7 +258,7 @@ unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count)
   if(cthread_count == 0) {
     // Threads per multiprocessor, based on compute capability, if not manually set.
     cthread_count = (gpuprop->major == 1 && gpuprop->minor < 2)?384:768;
-    if(gpuprop->major >= 2) cthread_count = 1024; // *2
+    if(gpuprop->major >= 2) cthread_count = 1024*2;
   } else {
     if(cthread_count < BLOCKSIZE) cthread_count *= BLOCKSIZE;
     else cthread_count -= cthread_count % BLOCKSIZE;
@@ -397,8 +397,8 @@ unsigned int cuda_app_init(int gpuno, int th, unsigned int cthread_count)
     printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
   printf("Subsection %d: %d-%d.\n", i, get_n_subsection_start(i+1), get_n_subsection_start(i));
 */
-  cudaStreamCreate(&stream);
-  checkCUDAErr("cudaStreamCreate");
+  //cudaStreamCreate(&stream);
+  //checkCUDAErr("cudaStreamCreate");
 
   return cthread_count;
 }
@@ -1198,7 +1198,7 @@ CHECK_MORE_NS_KERNEL(_32_24)
           shift = 1; \
           this_n_subsection--; \
         } else shift = 0; \
-        KERNEL <<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, n, d_factor_found, shift); \
+        KERNEL <<<cblockcount,BLOCKSIZE,0>>>(d_P, d_Ps, d_K, n, d_factor_found, shift); \
         checkCUDAErr("kernel " #KERNEL "invocation"); \
       }
 // Pass the arguments to the CUDA device, run the code, and get the results.
@@ -1218,10 +1218,10 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
 #ifndef NDEBUG
   bmsg("Setup successful...\n");
 #endif
-  cudaEventCreate(&stop);
-  checkCUDAErr("cudaEventCreate");
+  //cudaEventCreate(&stop);
+  //checkCUDAErr("cudaEventCreate");
 
-  d_start_ns<<<cblockcount,BLOCKSIZE,0,stream>>>(d_P, d_Ps, d_K, d_factor_found);
+  d_start_ns<<<cblockcount,BLOCKSIZE,0>>>(d_P, d_Ps, d_K, d_factor_found);
   checkCUDAErr("kernel invocation");
 #ifndef NDEBUG
   bmsg("Main kernel successful...\n");
@@ -1261,40 +1261,44 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
 }
 
 void get_factors_found(unsigned char *factor_found, const unsigned int cthread_count, const uint64_t start_t, int *check_ns_delay) {
+  // Get d_factor_found, into the thread'th factor_found array.
 #ifdef USE_BOINC
   cudaError_t err;
   int count = 0;
 #endif
-  // Get d_factor_found, into the thread'th factor_found array.
-  cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+
+  if(!blocking_sync_ok) {
+    // Manually sleep-wait for the result.
+    if(*check_ns_delay <= max_ns_delay) {
+      cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, check_ns_delay, check_ns_overlap, start_t);
+    } else {
+      // Pass in zero seconds to wait, and ignore the result passed out.
+      int i=0;
+      cudaSleepMemcpyFromTime(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost, &i, check_ns_overlap, start_t);
+    }
+  } else {
+    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+  }
+  //cudaStreamSynchronize(stream);
 #ifdef USE_BOINC
   err = cudaGetLastError();
-  while(err == 1 && count < 4) {
-    fprintf(stderr, "Warning: A kernel failed.  Retry %d.\n", count+1);
-    // Retry the computation.  BOINC-only because we can't be sure the thread is 0 otherwise.
-    // This could be corrected by passing more arguments into this function.
+  while(err != cudaSuccess) {
+    //fprintf(stderr, "Warning: A kernel failed with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    // Retry the Memcpy first.
+    cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    err = cudaGetLastError();
+    if(err == cudaSuccess) break;
+    //fprintf(stderr, "Warning: A kernel still failed with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    // Retry the computation.
     check_ns(NULL, cthread_count, 0);
     count++;
     cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    // If this is the last try, don't check the result here; that seems to eat it!
+    if(count == 10) break;
     err = cudaGetLastError();
   }
 #endif
-    
-    
   checkCUDAErr("getting factors found");
-  cudaEventRecord(stop, stream);
-  checkCUDAErr("cudaEventRecord");
-  if(*check_ns_delay <= max_ns_delay) {
-    cudaSleepWait(stop, check_ns_delay, check_ns_overlap, start_t);
-  } else {
-    while(cudaEventQuery(stop) == cudaErrorNotReady){
-      usleep(1000);
-    }
-  }
-  checkCUDAErr("waiting for factors found");
-  cudaEventDestroy(stop);
-  checkCUDAErr("cudaEventDestroy");
-  stop = NULL;
 
 #ifndef NDEBUG
   bmsg("Retrieve successful...\n");

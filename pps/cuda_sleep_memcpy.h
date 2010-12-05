@@ -12,5 +12,5 @@
 
 cudaError_t cudaSleepMemcpy(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap);
 cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, enum cudaMemcpyKind kind, int *delay, const int overlap, const uint64_t start_t);
-cudaError_t cudaSleepWait(cudaEvent_t &stop, int *delay, const int overlap, const uint64_t start_t);
+cudaError_t cudaStreamSleepWait(cudaStream_t &stream, int *delay, const int overlap, const uint64_t start_t);
 #endif

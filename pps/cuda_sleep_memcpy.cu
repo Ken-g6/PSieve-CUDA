@@ -116,13 +116,13 @@ cudaError_t cudaSleepMemcpyFromTime(void *dst, const void *src, size_t count, en
 }
 
 // Non-memcpy sleep-wait, for drivers that don't understand waiting for a signal.
-cudaError_t cudaSleepWait(cudaEvent_t &stop, int *delay, const int overlap, const uint64_t start_t) {
+cudaError_t cudaStreamSleepWait(cudaStream_t &stream, int *delay, const int overlap, const uint64_t start_t) {
 	cudaError_t ret;
 #ifndef BUSYWAIT
 	// Timer variables.
 	int busy_wait_t;
 #endif
-	ret = cudaEventQuery(stop);
+	ret = cudaStreamQuery(stream);
 	// If ready now, forget this foolishness.
 	if(ret != cudaErrorNotReady) {
 		*delay = 0;
@@ -143,7 +143,7 @@ cudaError_t cudaSleepWait(cudaEvent_t &stop, int *delay, const int overlap, cons
 	// Now, time the busy-wait.
 #endif
 	// This near-busy-wait loop is from Gerrit Slomma (roadrunner_gs)
-	while((ret=cudaEventQuery(stop)) == cudaErrorNotReady){
+	while((ret=cudaStreamQuery(stream)) == cudaErrorNotReady){
 		usleep(1000);
 	}
 #ifndef BUSYWAIT
