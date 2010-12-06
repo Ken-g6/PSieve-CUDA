@@ -1283,12 +1283,14 @@ void get_factors_found(unsigned char *factor_found, const unsigned int cthread_c
 #ifdef USE_BOINC
   err = cudaGetLastError();
   while(err != cudaSuccess) {
-    //fprintf(stderr, "Warning: A kernel failed with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    if(count >= 1) fprintf(stderr, "Warning: A kernel failed with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    /*
     // Retry the Memcpy first.
     cudaMemcpy(factor_found, d_factor_found, cthread_count*sizeof(unsigned char), cudaMemcpyDeviceToHost);
     err = cudaGetLastError();
     if(err == cudaSuccess) break;
-    //fprintf(stderr, "Warning: A kernel still failed with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    fprintf(stderr, "Warning: A kernel failed twice with error %s.  Retry %d.\n", cudaGetErrorString(err), count+1);
+    */
     // Retry the computation.
     check_ns(NULL, cthread_count, 0);
     count++;
