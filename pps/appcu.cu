@@ -750,20 +750,9 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 //#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
 #define TWIN_CHOOSE_EVEN kpos = (((unsigned int)kpos) & 1)?(my_P - kpos):kpos;
 // No zeroes on the right here.
-// Small kmax means testing the low and high bits of kpos separately.
-#define TWIN_TEST_NEG_SM
-/*
-#define TWIN_TEST_NEG_SM \
-    kpos = my_P - kpos; \
-    if (((unsigned int)(kpos>>32)) == 0 && ((unsigned int)kpos) <= ((unsigned int)d_kmax)) {\
-      TWIN_PRINT_NEG \
-      if(kpos >= d_kmin && n < d_nmax) my_factor_found |= 1; \
-    }
-*/
 #else
 #define TWIN_CHOOSE_EVEN_K0 kpos = k0;
 #define TWIN_CHOOSE_EVEN
-#define TWIN_TEST_NEG_SM
 #endif
 
 #ifdef _DEVICEEMU
@@ -794,64 +783,20 @@ invpowmod_REDClr (const uint64_t N, const uint64_t Ns) {
 #define D_NSTEP_COMPARE <
 #endif
 #define TEST_SHIFT_SMALL_KMAX(STAGE) \
-    if ((((unsigned int)(kpos>>32))>>i) == 0) \
-      if(((unsigned int)(kpos>>i)) <= ((unsigned int)d_kmax)) { \
+    if ((((unsigned int)(kpos>>32))>>i) == 0) {\
+      unsigned int new_k = (unsigned int)(kpos>>i); \
+      if(new_k <= (n+i)) { \
         PRINT_FACTOR_FOUND(STAGE) \
-        if((kpos>>i) >= d_kmin && i D_NSTEP_COMPARE d_nstep && n+i D_NSTEP_COMPARE l_nmax) my_factor_found |= 1; \
-      }
-
-__device__ void d_check_some_ns(const uint64_t my_P, const uint64_t Ps, uint64_t &k0,
-    unsigned int &n, unsigned char &my_factor_found, unsigned int &i) {
-  uint64_t kpos;
-/*#ifdef SEARCH_TWIN
-  uint64_t kneg;
-#endif*/
-  unsigned int l_nmax = n + d_kernel_nstep;
-  if(l_nmax > d_nmax) l_nmax = d_nmax;
-
-#ifdef _DEVICEEMU
-  //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (unsigned int)k0, d_kernel_nstep);
-#endif
-  do { // Remaining steps are all of equal size nstep
-    // Montgomery form doesn't matter; it's just k*2^64 mod P.
-    // Get a copy of K, which isn't in Montgomery form.
-    TWIN_CHOOSE_EVEN_K0
-    CTZLL_KPOS
-
-    if ((kpos >> i) <= d_kmax) {
-#ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (P[%d])\n", bmprefix(), my_P, (kpos>>i), n+i, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-      // Just flag this if kpos <= d_kmax.
-      if((kpos >> i) >= d_kmin && i D_NSTEP_COMPARE d_nstep) my_factor_found |= 1;
+        if(i D_NSTEP_COMPARE d_nstep && n+i D_NSTEP_COMPARE l_nmax) { \
+          i+=n; \
+          while(new_k < i) { \
+            new_k <<= 1; \
+            i--; \
+          } \
+          if(new_k == i) my_factor_found |= 1; \
+        } \
+      } \
     }
-
-/*
-#ifdef SEARCH_TWIN
-    kpos = my_P - kpos;
-
-    if (kpos <= d_kmax) {
-#ifdef _DEVICEEMU
-      //fprintf(stderr, "%s%lu | %lu*2^%u+/-1 (neg, P[%d])\n", bmprefix(), my_P, kpos, n, blockIdx.x * BLOCKSIZE + threadIdx.x);
-#endif
-      // Just flag this if kpos <= d_kmax.
-      if(kpos >= d_kmin) my_factor_found |= 1;
-    }
-#endif
-*/
-
-    // Proceed to the K for the next N.
-    // kpos is destroyed, just to keep the register count down.
-    // Despite the Montgomery step, this isn't really in Montgomery form.
-    // The step just divides by 2^64 after multiplying by 2^(64-nstep).  (All mod P)
-    kpos = k0 * Ps;
-    n += d_nstep;   // Calculate n here so the next instruction can run in parallel on GF104.
-    k0 = shiftmod_REDC(k0, my_P, kpos);
-  } while(n < l_nmax);
-#ifdef _DEVICEEMU
-  //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (unsigned int)k0);
-#endif
-}
 
 // Device-local function to iterate over some N's.
 // To avoid register pressure, clobbers i, and changes all non-const arguments.
@@ -873,7 +818,6 @@ __device__ void d_check_some_ns_small_kmax(const uint64_t my_P, const uint64_t P
 
     TEST_SHIFT_SMALL_KMAX("")
 
-    TWIN_TEST_NEG_SM
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
@@ -905,7 +849,6 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
     CTZLL_KPOS
     TEST_SHIFT_SMALL_KMAX("part 1/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
     shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
@@ -914,7 +857,6 @@ __device__ void d_check_some_ns_32(const uint64_t my_P, const uint64_t Ps, uint6
     CTZLL_KPOS
     TEST_SHIFT_SMALL_KMAX("part 2/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
     shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
@@ -958,7 +900,6 @@ __device__ void d_check_some_ns_small_kmax_fermi(const uint64_t my_P, const uint
     TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("")
 
-    TWIN_TEST_NEG_SM
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
@@ -994,7 +935,6 @@ __device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps,
     TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("part 1/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
 /*
@@ -1014,7 +954,6 @@ __device__ void d_check_some_ns_32_fermi(const uint64_t my_P, const uint64_t Ps,
     TWIN_CHOOSE_EVEN_K0
     FERMI_TEST_SMALL_KMAX("part 2/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
 /*
@@ -1065,7 +1004,6 @@ __device__ void d_check_some_ns_24(const uint64_t my_P, const uint64_t Ps, uint6
     TWIN_CHOOSE_EVEN_K0
     UNFERMI_TEST_24("")
 
-    TWIN_TEST_NEG_SM
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     // Despite the Montgomery step, this isn't really in Montgomery form.
@@ -1096,7 +1034,6 @@ __device__ void d_check_some_ns_32_24(const uint64_t my_P, const uint64_t Ps, ui
     TWIN_CHOOSE_EVEN_K0
     UNFERMI_TEST_24("part 1/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
     shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
@@ -1104,7 +1041,6 @@ __device__ void d_check_some_ns_32_24(const uint64_t my_P, const uint64_t Ps, ui
     TWIN_CHOOSE_EVEN_K0
     UNFERMI_TEST_24("part 2/2: ")
 
-    TWIN_TEST_NEG_SM
     // Skip 32 N's.
     n += 32;
     shiftmod_REDC32(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
@@ -1147,7 +1083,7 @@ __global__ void d_start_ns(const uint64_t *P, uint64_t *Ps, uint64_t *K, unsigne
 #ifdef SEARCH_TWIN
   // Search the non-even value one time only.
   if((((unsigned int)k0) & 1) == 0) k0 = my_P - k0;
-  if (((unsigned int)(k0>>32)) == 0 && ((unsigned int)k0) <= ((unsigned int)d_kmax)) {
+  if (((unsigned int)(k0>>32)) == 0 && ((unsigned int)k0) <= d_nmin) {
     TWIN_PRINT_NEG
       if(k0 >= d_kmin) factor_found_arr[i] = 1;
   }
@@ -1173,7 +1109,7 @@ __global__ void d_check_more_ns##TYPE (const uint64_t *P, const uint64_t *Ps, ui
   } \
 }
 
-CHECK_MORE_NS_KERNEL()
+//CHECK_MORE_NS_KERNEL()
 // Continue checking N's for small kmax.
 CHECK_MORE_NS_KERNEL(_small_kmax)
 // Continue checking N's for nstep == 32
@@ -1256,7 +1192,8 @@ void check_ns(const uint64_t *P, const unsigned int cthread_count, const int th)
     }
     //#endif
   } else {
-    CALL_LOOP(d_check_more_ns)
+    fprintf(stderr, "Error: KMax or NStep too high!\n");
+    bexit(1);
   }
 }
 

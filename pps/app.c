@@ -46,14 +46,6 @@
 #define INLINE static __inline
 #endif
 
-#ifdef SEARCH_TWIN
-#define KSTEP 6
-#define KOFFSET 3
-#else
-#define KSTEP 2
-#define KOFFSET 1
-#endif
-
 // Macro bsfq (Bit Search Forward Quadword) for 32-bit.
 // MPOS = result (32-bit)
 // KPOS = input (64-bit; evaluated twice!)
@@ -77,7 +69,7 @@
 #define FORMAT_NEWPGEN 1
 #define FORMAT_ABCD 2
 
-uint64_t kmin = 0, kmax = 0;
+uint64_t kmin = 1, kmax = 0;
 #ifdef EMM
 static uint64_t xkmax[2] __attribute__((aligned(16)));
 static int sse2_in_range = 0;
@@ -103,8 +95,6 @@ static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
 static uint64_t r0arr[9];
 static int bbitsarr[9];
-static unsigned int kstep = KSTEP;
-static unsigned int koffset = KOFFSET;
 
 struct n_subsection *thread_subsections;
 
@@ -143,7 +133,7 @@ static void report_factor(uint64_t p, uint64_t k, unsigned int n, int c)
 #endif
 }
 
-// 1 if a number mod 15 is not divisible by 2 or 3.
+// 1 if a number mod 15 is not divisible by 5 or 3.
 //                             0  1  2  3  4  5  6  7  8  9 10 11 12 13 14
 static const int prime15[] = { 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1 };
 
@@ -152,48 +142,52 @@ static void
 #else
 static void __attribute__((noinline))
 #endif
-test_factor(uint64_t p, uint64_t k, unsigned int n, int c)
+test_factor(uint64_t p, const uint64_t k_lg, unsigned int n, int c)
 {
-  uint64_t b = k/kstep;
+  // K's cannot exceed N's here, which cannot be uint64_t's.
+  unsigned int k = (unsigned int)k_lg;
 
-  if((k == kstep*b+koffset) && n >= nmin && n < nmax) { // k is odd.
+  // Normalize the Cullen/Woodall candidate.
+  while(k<n) {
+    k <<= 1;
+    n--;
+  }
+
+  if((k == n) && k >= nmin && k <= nmax) {
     if (bitmap == NULL) {
-      unsigned int khigh = (unsigned int)(k>>32);
-      uint64_t mod31 = (uint64_t)1;
+      //uint64_t mod31 = (uint64_t)1;
       // Check that K*2^N+/-1 is not divisible by 3, 5, or 7, to minimize factors printed.
       // We do 3 and 5 at the same time (15 = 2^4-1), then 7 (=2^3-1).
       // Then 17, 11 (and 31), 13, and maybe 19, if there's space. 23 can also go in there, if it's worth it.
       // (k*(1<<(n%2))+c)%3 == 0
-      if(prime15[(unsigned int)(((k<<(n&3))+(uint64_t)c)%(uint64_t)15)] && 
-          (unsigned int)(((k<<(n%3))+(uint64_t)c)%(uint64_t)7) != 0 &&
-          (khigh >= (1<<(32-8)) || ((unsigned int)(((k<<(n&7))+(uint64_t)c)%(uint64_t)17) != 0 && 
-          (khigh >= (1<<(32-10)) || ((unsigned int)((mod31=(k<<(n%10))+(uint64_t)c)%(uint64_t)11) != 0 &&
-          (khigh >= (1<<(32-11)) || ((unsigned int)(((k<<(n%11))+(uint64_t)c)%(uint64_t)23) != 0 &&
-          (khigh >= (1<<(32-12)) || ((unsigned int)(((k<<(n%12))+(uint64_t)c)%(uint64_t)13) != 0 &&
-          (khigh >= (1<<(32-18)) || ((unsigned int)(((k<<(n%18))+(uint64_t)c)%(uint64_t)19) != 0
-          )))))))))))
-        if((unsigned int)(mod31%(uint64_t)31) != 0 && try_all_factors(k, n, c) == 0)
+      if(prime15[(unsigned int)(((k<<(n&3))+c)%15)] && 
+          (unsigned int)(((k<<(n%3))+c)%7) != 0)
+        if(try_all_factors(k, n, c) == 0)
           report_factor(p,k,n,c);
     } else {
-      if (bitmap[n-nmin][(unsigned int)((b-b0)/8)] & (1<<(b-b0)%8))
+      //printf("%sUNTESTED: %"PRIu64" | %u*2^%u%+d\n",bmprefix(),p,k,n,c);
+      if (bitmap[(c==-1)?0:1][(unsigned int)((k-b0)/8)] & (1<<(k-b0)%8))
         report_factor(p,k,n,c);
     }
   }
 }
 
+// find the log base 2 of a number.  Need not be fast; only done twice.
+int lg2(uint64_t v) {
+  int r = 0; // r will be lg(v)
+
+  while (v >>= 1) r++;
+  return r;
+}
+
+#define ABCDFORMATSTR "ABC $a*$b^$a$%c"
 /* Scan the input file to determine format and values for kmin,kmax,nmin,nmax.
  */
 static FILE* scan_input_file(const char *fn)
 {
   FILE *file;
-#ifdef SEARCH_TWIN
-  uint64_t k0, k1, k, d, p0;
-  unsigned int n0, n1, n, m;
-#else
-  uint64_t k0, k1, k, p0;
-  unsigned int n0, n1, d, n;
-#endif
-  int filesearch_proth = 1;
+  unsigned int n0, n1, n;
+  int fileaddsign = 1;
   char ch;
 
   if ((file = bfopen(fn,"r")) == NULL)
@@ -202,117 +196,58 @@ static FILE* scan_input_file(const char *fn)
     bexit(ERR_FOPEN);
   }
 
-#ifdef SEARCH_TWIN
-  search_proth = +1;
-  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
-             &m,&n,&k) == 3 && m == n)
+  if (fscanf(file,ABCDFORMATSTR,
+             &ch) == 1 && 'c' == ch)
     file_format = FORMAT_ABCD;
-  else if (fscanf(file,"%"SCNu64":T:%*c:2:%c",&p0,&ch) == 2 && ch == '3')
-#else
-  if (fscanf(file,"ABCD %"SCNu64"*2^$a%c1 [%u]",
-             &k,&ch,&n) == 3)
-  {
-    file_format = FORMAT_ABCD;
-    search_proth = (ch=='+')?1:-1;
-  }
-  else if (fscanf(file,"%"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) == 2 && (filesearch_proth == 1 || filesearch_proth == -1 || filesearch_proth == 255 || filesearch_proth == 257))
-#endif
-  {
-    search_proth = (int)((char)filesearch_proth);
-    file_format = FORMAT_NEWPGEN;
-    if (fscanf(file," %"SCNu64" %u",&k,&n) != 2)
-    {
-      fprintf(stderr,"%sInvalid line 2 in input file `%s'\n",bmprefix(),fn);
-      bexit(ERR_SCANF);
-    }
-  }
   else
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
     bexit(ERR_SCANF);
   }
-
-  k0 = k1 = k;
-  n0 = n1 = n;
+  while(ch != '\n' && ch != '\r') ch=getc(file);
+  while(ch == '\n' || ch == '\r') ch=getc(file);
+  ungetc(ch, file);
+  ch = 'c';
 
   if (file_format == FORMAT_ABCD)
   {
     //while(getc(file) != '\n');
-    printf("Scanning ABCD file...\n");
+    printf("Scanning ABC file...\n");
+    if(fscanf(file,"%u 2 %d", &n, &fileaddsign) != 2) {
+      bmsg("Invalid first line in input file.\n");
+      bexit(ERR_SCANF);
+    }
+    while(ch != '\n' && ch != '\r') ch=getc(file);
+    while(ch == '\n' || ch == '\r') ch=getc(file);
+    ungetc(ch, file);
+    n0 = n1 = n;
     while (1)
     {
-      while(getc(file) != '\n');
       while(1) {
         char c = getc(file);
         if(!isdigit(c)) {
           ungetc(c, file);
           break;
         }
-        d = c-'0';
+        n = c-'0';
         while(isdigit(c=getc(file))) {
-          d *= 10;
-          d += c-'0';
+          n *= 10;
+          n += c-'0';
         }
-#ifdef SEARCH_TWIN
-        k += d;
-#else
-        n += d;
-#endif
-        while(c != '\n') c=getc(file);
+        while(c != '\n' && c != '\r') c=getc(file);
+        while(c == '\n' || c == '\r') c=getc(file);
+        ungetc(c, file);
       }
       //while (fscanf(file," %u",&d) == 1)
 
-#ifdef SEARCH_TWIN
-      if (k1 < k)
-        k1 = k;
-      if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]",
-                 &m,&n,&k) == 3 && m == n)
-      {
-#ifndef USE_BOINC
-        if((((int)n)&15) == 1) printf("\rFound N=%u\r", n);
-#endif
-#else
-      if (n1 < n)
+      if (n1 < n) {
+        printf("Read maximum n %u\n", n);
         n1 = n;
-      if (fscanf(file, " ABCD %"SCNu64"*2^$a%c1 [%u]",
-                 &k,&ch,&n) == 3)
-      {
-#ifndef USE_BOINC
-        if((((int)k)&15) == 1) printf("\rFound K=%"SCNu64"\r", k);
-#endif
-#endif
-
-        fflush(stdout);
-        if (k0 > k)
-          k0 = k;
-        if (k1 < k)
-          k1 = k;
-
-        if (n0 > n)
-          n0 = n;
-        if (n1 < n)
-          n1 = n;
       }
       else
         break;
     }
   }
-  else /* if (file_format == FORMAT_NEWPGEN) */
-  {
-    while (fscanf(file," %"SCNu64" %u",&k,&n) == 2)
-    {
-      if (k0 > k)
-        k0 = k;
-      if (k1 < k)
-        k1 = k;
-
-      if (n0 > n)
-        n0 = n;
-      if (n1 < n)
-        n1 = n;
-    }
-  }
-  n1++;
 
   if (ferror(file))
   {
@@ -321,99 +256,22 @@ static FILE* scan_input_file(const char *fn)
   }
 
   rewind(file);
-#ifdef SEARCH_TWIN
-  if (file_format == FORMAT_ABCD)
-  {
-    k0 = kstep*k0+koffset;
-    k1 = kstep*k1+koffset;
-  }
-#endif
-  printf("Found K's from %"SCNu64" to %"SCNu64".\n", k0, k1);
   printf("Found N's from %u to %u.\n", n0, n1);
 
-  if (kmin < k0)
-    kmin = k0;
-  if (kmax == 0 || kmax > k1)
-    kmax = k1;
+  if (kmax == 0 || kmax > n1)
+    kmax = n1;
 
   if (nmin < n0)
     nmin = n0;
   if (nmax == 0 || nmax > n1)
-    nmax = n1;
+    nmax = n1 + lg2(n1)+1;
   return file;
-}
-
-static void read_newpgen_file(const char *fn, FILE* file)
-{
-  //FILE *file;
-  uint64_t k, p0;
-  unsigned int n, line, count;
-#ifdef SEARCH_TWIN
-  char ch;
-#else
-  int filesearch_proth;
-#endif
-
-  if(file == NULL) {
-    if ((file = bfopen(fn,"r")) == NULL)
-    {
-      perror(fn);
-      bexit(ERR_FOPEN);
-    }
-  }
-#ifdef SEARCH_TWIN
-  if (fscanf(file," %"SCNu64":T:%*c:2:%c",&p0,&ch) != 2 || ch != '3')
-  {
-    fprintf(stderr,"Invalid header in input file `%s'\n",fn);
-    exit(EXIT_FAILURE);
-  }
-#else
-  if (fscanf(file," %"SCNu64":P:%*c:2:%d",&p0,&filesearch_proth) != 2)
-  {
-    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
-    bexit(ERR_SCANF);
-  }
-#endif
-
-  line = 0;
-  count = 0;
-  while (fscanf(file," %"SCNu64" %u",&k,&n) == 2)
-  {
-    line++;
-    if ((k%kstep) != koffset)
-    {
-      fprintf(stderr,"%sInvalid line %u in input file `%s'\n",bmprefix(),line,fn);
-      bexit(ERR_SCANF);
-    }
-    if (k >= kmin && k <= kmax && n >= nmin && n <= nmax)
-    {
-      uint64_t bit = k/kstep-b0;
-      bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
-      count++; /* TODO: Don't count duplicates */
-    }
-  }
-
-  if (ferror(file))
-  {
-    fprintf(stderr,"%sError reading input file `%s'\n",bmprefix(),fn);
-    bexit(ERR_SCANF);
-  }
-
-  //rewind(file);
-  fclose(file);
-
-  printf("Read %u terms from NewPGen format input file `%s'\n",count,fn);
 }
 
 static void read_abcd_file(const char *fn, FILE *file)
 {
-#ifdef SEARCH_TWIN
-  uint64_t k, d;
-  unsigned int n, m, count;
-#else
-  uint64_t k;
-  unsigned int n, count, d;
-#endif
+  unsigned int n, count;
+  char ch;
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
@@ -423,81 +281,47 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_FOPEN);
     }
   }
-#ifdef SEARCH_TWIN
-  if (fscanf(file,"ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
-             &m,&n,&k) != 3 || m != n)
-#else
-  if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
-        &k,&n) != 2)
-#endif
+  if (fscanf(file, ABCDFORMATSTR, &ch) != 1 || ch != 'c')
   {
     fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
     bexit(ERR_SCANF);
   }
+  while(ch != '\n' && ch != '\r') ch=getc(file);
+  while(ch == '\n' || ch == '\r') ch=getc(file);
+  ungetc(ch, file);
 
   count = 0;
   //while(getc(file) != '\n');
-  printf("Reading ABCD file.\n");
-  while (1)
+  printf("Reading ABC file.\n");
+  while(1)
   {
-#ifdef SEARCH_TWIN
-    uint64_t bit = k-b0;
-#else
-    uint64_t bit = (k-kmin)/kstep;
-#endif
-    unsigned int bo8 = (unsigned int)(bit/8);
-    unsigned int bm8 = (unsigned int)(1 << bit%8);
-    /*if(k < kmin || k > kmax || bit < 0 || bit > (kmax-kmin)/2) {
-      printf("\n\nK error: K = %"SCNu64", which is outside %"SCNu64" - %"SCNu64"\n\n\n", k, kmin, kmax);
-      bexit(ERR_INVALID_PARAM);
-    }*/
-    if(n >= nmin) bitmap[n-nmin][bo8] |= bm8;
+    unsigned int bit;
+    char c = getc(file);
+    while(c == 10) c = getc(file);
+    if(!isdigit(c)) {
+      //ungetc(c, file);
+      //printf("Read char %d, which is not a digit.\n", c);
+      break;
+    }
+    n = c-'0';
+    while(isdigit(c=getc(file))) {
+      n *= 10;
+      n += c-'0';
+    }
+    if(c != ' ') { fprintf(stderr, "Invalid file format, line %u\n", count+1); bexit(ERR_SCANF); }
+    c = getc(file);
+    if(c != '2') { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
+    c = getc(file);
+    if(c != ' ') { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
+    c = getc(file);
+
+    bit = n-nmin;
+    if(n >= nmin && n <= nmax) bitmap[(c=='-')?0:1][bit/8] |= (1 << bit%8);
     //printf("Read %lu*2^%d+/-1\n", k, n);
     count++;
-    while(1)
-    {
-      char c = getc(file);
-      while(c == 10) c = getc(file);
-      if(!isdigit(c)) {
-        ungetc(c, file);
-        //printf("Read char %d, which is not a digit.\n", c);
-        break;
-      }
-      d = c-'0';
-      while(isdigit(c=getc(file))) {
-        d *= 10;
-        d += c-'0';
-      }
-
-#ifdef SEARCH_TWIN
-      k += d;
-      bit = k-b0;
-      bitmap[n-nmin][(unsigned int)(bit/8)] |= (1 << bit%8);
-#else
-      n += d;
-      if(n >= nmin && n <= nmax) bitmap[n-nmin][bo8] |= bm8;
-      //printf("Read %lu*2^%d+/-1\n", k, n);
-#endif
-      count++;
-      while(c != '\n') c=getc(file);
-    }
-#ifndef USE_BOINC
-#ifdef SEARCH_TWIN
-    if((((int)n)&15) == 1) printf("\rRead N=%u\r", n);
-#else
-    if((((int)k)&15) == 1) printf("\rRead K=%"SCNu64"\r", k);
-#endif
-#endif
-    fflush(stdout);
-
-#ifdef SEARCH_TWIN
-    if (fscanf(file," ABCD (6*$a+3)*2^%u+1 & (6*$a+3)*2^%u-1 [%"SCNu64"]%*[^\n]",
-               &m,&n,&k) != 3 || m != n)
-#else
-    if (fscanf(file, "ABCD %"SCNu64"*2^$a%*c1 [%u]%*[^\n]",
-          &k,&n) != 2)
-#endif
-      break;
+    while(c != '\n' && c != '\r') c=getc(file);
+    while(c == '\n' || c == '\r') c=getc(file);
+    ungetc(c, file);
   }
 
   if (ferror(file))
@@ -505,11 +329,11 @@ static void read_abcd_file(const char *fn, FILE *file)
     printf("\nError reading input file `%s'\n",fn);
     bexit(ERR_SCANF);
   }
-  //printf("\n\nDone reading ABCD file!\n");
+  //printf("\n\nDone reading ABC file!\n");
 
   fclose(file);
 
-  printf("Read %u terms from ABCD format input file `%s'\n",count,fn);
+  printf("Read %u terms from ABC format input file `%s'\n",count,fn);
 }
 
 /* This function is called once before anything is done. It should at least
@@ -588,17 +412,6 @@ int app_parse_option(int opt, char *arg, const char *source)
       status = parse_uint((unsigned int *)(&device_opt),arg,0,INT32_MAX);
       break;
       
-    case 'M':
-      // Change K's modulus.
-      status = parse_uint(&kstep,arg,1,(1U<<31)-1);
-      if(koffset >= kstep) koffset = kstep/2;
-      break;
-
-    case 's':
-      // Change K's modoffset.
-      status = parse_uint(&koffset,arg,1,(1U<<31)-1);
-      break;
-
 #ifndef SEARCH_TWIN
     case 'R':
       search_proth = -1;
@@ -618,9 +431,6 @@ void app_help(void)
   printf("-f --factors=FILE  Write factors to FILE (default `%s')\n",
          FACTORS_FILENAME_DEFAULT);
   printf("-i --input=FILE    Read initial sieve from FILE\n");
-  printf("-M --modulus       (Default %u\n", KSTEP);
-  printf("-s --modshift      Print only k's == s mod M. Default %u, or M/2\n",
-      KOFFSET);
   printf("-k --kmin=K0\n");
   printf("-K --kmax=K1       Sieve for primes k*2^n+/-1 with K0 <= k <= K1\n");
   printf("-m --mthreads=M    Force M threads or blocks/multiprocessor.\n");
@@ -632,14 +442,6 @@ void app_help(void)
   printf("-d --device=N      Use GPU N instead of 0-threads\n");
 }
 
-// find the log base 2 of a number.  Need not be fast; only done twice.
-static int lg2(uint64_t v) {
-	int r = 0; // r will be lg(v)
-
-	while (v >>= 1) r++;
-	return r;
-}
-
 /* This function is called once before any threads are started.
  */
 void app_init(void)
@@ -648,14 +450,15 @@ void app_init(void)
   unsigned int i;
 
   print_factors = (quiet_opt)?0:1;
-  if (input_filename == NULL && (kmin == 0 || kmax == 0))
+  if (input_filename == NULL && (nmax == 0))
   {
-    bmsg("Please specify an input file or all of kmin, kmax, and nmax\n");
+    bmsg("Please specify an input file or nmax\n");
     bexit(ERR_INVALID_PARAM);
   }
+  kmax = nmax;
 
   if (input_filename != NULL
-      && (kmin == 0 || kmax == 0 || nmin == 0 || nmax == 0))
+      && (nmax == 0))
     file = scan_input_file(input_filename);
 
   if (kmin > kmax)
@@ -667,12 +470,6 @@ void app_init(void)
   if (kmax >= pmin)
   {
     bmsg("kmax < pmin is required\n");
-    bexit(ERR_INVALID_PARAM);
-  }
-
-  if (kmax-kmin >= (UINT64_C(3)<<36))
-  {
-    bmsg("kmax-kmin < 3*2^36 is required\n");
     bexit(ERR_INVALID_PARAM);
   }
 
@@ -698,10 +495,8 @@ void app_init(void)
     bexit(ERR_INVALID_PARAM);
   }
 
-  b0 = kmin/kstep;
-  b1 = kmax/kstep;
-  kmin = b0*kstep+koffset;
-  kmax = b1*kstep+koffset;
+  b0 = nmin;
+  b1 = nmax;
 
   for (nstep = 1; (kmax << nstep) < pmin; nstep++)
     ;
@@ -722,16 +517,20 @@ void app_init(void)
   // Allocate and fill bitmap.
   if (input_filename != NULL)
   {
-    bitmap = xmalloc((nmax-nmin+1)*sizeof(unsigned char *));
-    for (i = nmin; i <= nmax; i++)
+    bitmap = xmalloc(2*sizeof(unsigned char *));
+    for (i = 0; i <= 1; i++)
     {
-      bitmap[i-nmin] = xmalloc((unsigned int)((b1-b0+8)/8));
-      memset(bitmap[i-nmin],0,(unsigned int)((b1-b0+8)/8));
+      bitmap[i] = xmalloc((unsigned int)((b1-b0+8)/8));
+      memset(bitmap[i],0,(unsigned int)((b1-b0+8)/8));
     }
     if (file_format == FORMAT_ABCD)
       read_abcd_file(input_filename, file);
     else /* if (file_format == FORMAT_NEWPGEN) */
-      read_newpgen_file(input_filename, file);
+    {
+      fprintf(stderr, "NewPGen file format not available.\n");
+      bexit(EXIT_FAILURE);
+      //read_newpgen_file(input_filename, file);
+    }
   } else sieve_small_primes(11);
 
   if (factors_filename == NULL)
@@ -774,8 +573,7 @@ void app_init(void)
 #endif
 #endif
 
-  printf(APP_NAME " initialized: %"PRIu64" <= k <= %"PRIu64", %u <= n < %u\n",
-         kmin,kmax,nmin,nmax);
+  printf(APP_NAME " initialized: %u <= n <= %u\n", nmin,nmax);
   fflush(stdout);
 }
 
@@ -1061,7 +859,7 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
 #ifdef SEARCH_TWIN
     // Select the first odd one.  All others are tested by overlap.
     kpos = (k0&1)?k0:(my_P - k0);
-    if (kpos <= kmax && kpos >= kmin) {
+    if (kpos <= l_nmin) {
       cands_found++;
       test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
     }
@@ -1085,17 +883,25 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     BSFQ(i, kpos, 1);
 
 #ifdef SEARCH_TWIN
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
+    if ((kpos>>i) <= n+i && i <= ld_nstep) {
 #else
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
+    if ((kpos>>i) <= n+i && i < ld_nstep) {
 #endif
-      cands_found++;
-      //if (i < ld_nstep)
+      unsigned int new_k = (kpos>>i);
+      unsigned int new_n = n+i;
+      while(new_k < new_n) {
+        new_k <<= 1;
+        new_n--;
+      }
+      if(new_k == new_n) {
+        cands_found++;
+        //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
         test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
         test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
+      }
     }
 
     // Proceed to the K for the next N.
@@ -1103,7 +909,7 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     k0 = shiftmod_REDC(k0, my_P, kPs);
   } while (n < l_nmax);
   if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64" in %u<=n<%u.\n", bmprefix(), my_P, l_nmin, l_nmax);
 #ifdef USE_BOINC
     bexit(ERR_NEG);
 #endif
@@ -1134,7 +940,7 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
 #ifdef SEARCH_TWIN
     // Select the first odd one.  All others are tested by overlap.
     kpos = (k0&1)?k0:(my_P - k0);
-    if (kpos <= kmax && kpos >= kmin) {
+    if (kpos <= l_nmin) {
       cands_found++;
       test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
     }
@@ -1161,13 +967,21 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
 #else
     if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
 #endif
-      cands_found++;
+      unsigned int new_k = (kpos>>i);
+      unsigned int new_n = n+i;
+      while(new_k < new_n) {
+        new_k <<= 1;
+        new_n--;
+      }
+      if(new_k == new_n) {
+        cands_found++;
       //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
         test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
         test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
+      }
     }
 
     // Proceed to the K for the next N.
@@ -1177,7 +991,7 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
     //if(kpos != k0) printf("Expected k0=%lu, but got %lu!\n", kpos, k0);
   } while (n < l_nmax);
   if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
+    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64" in %u<=n<%u.\n", bmprefix(), my_P, l_nmin, l_nmax);
 #ifdef USE_BOINC
     bexit(ERR_NEG);
 #endif
@@ -1338,8 +1152,8 @@ void app_fini(void)
 
   if (bitmap != NULL)
   {
-    for (i = nmin; i <= nmax; i++)
-      free(bitmap[i-nmin]);
+    for (i = 0; i <= 1; i++)
+      free(bitmap[i]);
     free(bitmap);
     bitmap = NULL;
   }

@@ -1,6 +1,6 @@
 # Build Linux apps by default, set PLATFORM=mac for Mac build
 PLATFORM ?= linux
-TPS_APPNAME = tpsieve-cuda
+TPS_APPNAME = cwpsieve-cuda
 APPNAME = ppsieve-cuda
 APPPATH = pps
 COMMON_OBJS = ../clock.o cuda_sleep_memcpy.o factor_proth.o
@@ -13,8 +13,6 @@ OBJS64 = ../main64.o ../putil64.o ../sieve64.o app64.o appcu64.o $(COMMON64_OBJS
 TPSOBJS64 = ../tpmain64.o ../putil64.o ../sieve64.o tpapp64.o tpappcu64.o $(COMMON64_OBJS)
 BOINC_TPSOBJS64 = ../do_boinc_init64.o ../tpmain_boinc64.o ../putil_boinc64.o ../sieve_boinc64.o tpapp_boinc64.o tpappcu_boinc64.o $(COMMON64_OBJS)
 BOINC64_OBJS = ../do_boinc_init64.o ../main_boinc64.o ../putil_boinc64.o ../sieve_boinc64.o app_boinc64.o appcu_boinc64.o $(COMMON64_OBJS)
-BOINC_BINS = $(APPNAME)-boinc-x86-$(PLATFORM) $(APPNAME)-boinc-x86_64-$(PLATFORM)
-NON_BOINC_BINS = $(APPNAME)-x86-$(PLATFORM) $(APPNAME)-x86_64-$(PLATFORM)
 # BINS should also have $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86-windows.exe, but those can't be made on Linux. (Yet.)
 BINS = $(NON_BOINC_BINS) $(BOINC_BINS)
 TPS_BINS = $(TPS_APPNAME)-x86-$(PLATFORM) $(TPS_APPNAME)-x86_64-$(PLATFORM) 
@@ -82,19 +80,12 @@ endif
 #nvcc $DOEMU --ptxas-options=-v -O3 $cleanvars -DUSE_BOINC -DNDEBUG -D_REENTRANT -m32 -I. -I.. -o $appname-boinc-x86-$(PLATFORM) $BOINC_LOAD_LIBS ../main.c ../sieve.c ../clock.c ../putil.c ../do_boinc_init.cpp cuda_sleep_memcpy.cu appcu.cu app.c factor_proth.c $link -lboinc_api -lboinc `g++ -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 
 # Make-able targets:
-all: $(BINS) $(TPS_BINS) $(TPS_BOINC_BINS)
+all: $(TPS_BINS) $(TPS_BOINC_BINS)
 
 # Making zipfiles (requires binaries):
-zips: $(APPNAME).zip $(TPS_APPNAME).zip $(APPNAME)-src.zip
 
 $(TPS_APPNAME).zip: $(TPS_BINS) $(TPS_BOINC_BINS) gitstatus changes
 	-rm $@ ; zip -9 $(TPS_APPNAME).zip $(TPS_APPNAME)-x86-$(PLATFORM) $(TPS_APPNAME)-boinc-x86-$(PLATFORM) $(TPS_APPNAME)-x86_64-$(PLATFORM) $(TPS_APPNAME)-boinc-x86_64-$(PLATFORM) $(TPS_APPNAME)-boinc-x86-windows.exe $(TPS_APPNAME)-x86-windows.exe $(TPS_APPNAME)-boinc-x86_64-windows.exe $(TPS_APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(TPS_APPNAME).sh $(TPS_APPNAME).bat *config.txt license.txt
-
-$(APPNAME).zip: $(BINS) gitstatus changes
-	-rm $@ ; zip -9 $(APPNAME).zip $(APPNAME)-x86-$(PLATFORM) $(APPNAME)-boinc-x86-$(PLATFORM) $(APPNAME)-x86_64-$(PLATFORM) $(APPNAME)-boinc-x86_64-$(PLATFORM) $(APPNAME)-boinc-x86-windows.exe $(APPNAME)-x86-windows.exe $(APPNAME)-boinc-x86_64-windows.exe $(APPNAME)-x86_64-windows.exe README.txt CHANGES.txt $(APPNAME).sh $(APPNAME).bat *config.txt license.txt
-
-$(APPNAME)-src.zip: $(BINS) gitstatus changes
-	-rm $@ ; cd .. ; zip -9 $(APPPATH)/$(APPNAME)-src.zip Makefile $(APPPATH)/Makefile *.txt *.[ch] *.cpp *.sln $(APPPATH)/*.[ch] $(APPPATH)/*.cu $(APPPATH)/README.txt $(APPPATH)/CHANGES.txt $(APPPATH)/*config.txt $(APPPATH)/make-*.sh $(APPPATH)/$(APPNAME).sh $(APPPATH)/*.bat vc/*
 
 gitstatus:
 	git status | grep nothing > /dev/null || git status
@@ -110,31 +101,19 @@ non-boinc: $(NON_BOINC_BINS) $(TPS_BINS)
 boinc: $(BOINC_BINS) $(TPS_BOINC_BINS)
 
 clean:
-	-rm *.o ../*.o $(BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
-
-$(APPNAME)-x86-$(PLATFORM): $(OBJS)
-	$(LD32) -o $@ $(LDFLAGS) $^ $(LINK)
-
-$(APPNAME)-boinc-x86-$(PLATFORM): $(BOINC_OBJS)
-	$(LD32) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC_LINK)
+	-rm *.o ../*.o $(BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip
 
 $(TPS_APPNAME)-x86-$(PLATFORM): $(TPSOBJS)
-	$(LD32) -o $@ $(LDFLAGS) $^ $(LINK) -DSEARCH_TWIN
+	$(LD32) -o $@ $(LDFLAGS) $^ $(LINK) 
 
 $(TPS_APPNAME)-boinc-x86-$(PLATFORM): $(BOINC_TPSOBJS)
-	$(LD32) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC_LINK) -DSEARCH_TWIN
-
-$(APPNAME)-x86_64-$(PLATFORM): $(OBJS64)
-	$(LD64) -o $@ $(LDFLAGS) $^ $(LINK)
-
-$(APPNAME)-boinc-x86_64-$(PLATFORM): $(BOINC64_OBJS)
-	$(LD64) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC64_LINK)
+	$(LD32) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC_LINK) 
 
 $(TPS_APPNAME)-x86_64-$(PLATFORM): $(TPSOBJS64)
-	$(LD64) -o $@ $(LDFLAGS) $^ $(LINK) -DSEARCH_TWIN
+	$(LD64) -o $@ $(LDFLAGS) $^ $(LINK) 
 
 $(TPS_APPNAME)-boinc-x86_64-$(PLATFORM): $(BOINC_TPSOBJS64)
-	$(LD64) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC64_LINK) -DSEARCH_TWIN
+	$(LD64) -o $@ $(BOINC_LDFLAGS) $^ $(BOINC64_LINK) 
 
 # OBJS
 ../main.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
@@ -153,13 +132,13 @@ appcu.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $<
 
 ../tpmain.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
-	$(CC32) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+	$(CC32) -o $@ $(CFLAGS) $< 
 
 tpapp.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
-	$(CC32) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+	$(CC32) -o $@ $(CFLAGS) $< 
 
 tpappcu.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
-	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $< -DSEARCH_TWIN
+	$(NVCC) -c -m32 -o $@ $(NVCFLAGS) $< 
 
 
 # BOINC_OBJS
@@ -182,13 +161,13 @@ appcu_boinc.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $<
 
 ../tpmain_boinc.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
-	$(CC32) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
+	$(CC32) -o $@ $(BOINC_CFLAGS) $< 
 
 tpapp_boinc.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
-	$(CC32) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
+	$(CC32) -o $@ $(BOINC_CFLAGS) $< 
 
 tpappcu_boinc.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
-	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $< -DSEARCH_TWIN
+	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $< 
 
 #  COMMON_OBJS
 ../clock.o: ../clock.c ../clock.h
@@ -217,13 +196,13 @@ appcu64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $<
 
 ../tpmain64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
-	$(CC64) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+	$(CC64) -o $@ $(CFLAGS) $< 
 
 tpapp64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
-	$(CC64) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
+	$(CC64) -o $@ $(CFLAGS) $< 
 
 tpappcu64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
-	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $< -DSEARCH_TWIN
+	$(NVCC) -c -m64 -o $@ $(NVCFLAGS) $< 
 
 
 # BOINC64_OBJS
@@ -246,13 +225,13 @@ appcu_boinc64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $<
 
 ../tpmain_boinc64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
-	$(CC64) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
+	$(CC64) -o $@ $(BOINC_CFLAGS) $< 
 
 tpapp_boinc64.o: app.c app.h ../putil.h appcu.h ../clock.h factor_proth.h ../main.h
-	$(CC64) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
+	$(CC64) -o $@ $(BOINC_CFLAGS) $< 
 
 tpappcu_boinc64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
-	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $< -DSEARCH_TWIN
+	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $< 
 
 
 #  COMMON64_OBJS

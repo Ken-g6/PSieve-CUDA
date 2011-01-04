@@ -368,9 +368,9 @@ static uint64_t read_checkpoint(void)
 
 
 #ifdef SINGLE_THREAD
-static const char *short_opts = "p:P:Q:B:C:c:r:z:qh" APP_SHORT_OPTS;
+static const char *short_opts = "p:P:Q:B:C:c:s:r:z:qh" APP_SHORT_OPTS;
 #else
-static const char *short_opts = "p:P:Q:B:C:c:r:t:z:qh" APP_SHORT_OPTS;
+static const char *short_opts = "p:P:Q:B:C:c:s:r:t:z:qh" APP_SHORT_OPTS;
 #endif
 static const struct option long_opts[] = {
   {"pmin",        required_argument, 0, 'p'},
@@ -380,6 +380,7 @@ static const struct option long_opts[] = {
   {"chunksize",   required_argument, 0, 'C'},
   {"blocks",      required_argument, 0, 256},
   {"checkpoint",  required_argument, 0, 'c'},
+  {"savepoint",   required_argument, 0, 's'},
   {"report",      required_argument, 0, 'r'},
 #ifndef SINGLE_THREAD
   {"nthreads",    required_argument, 0, 't'},
@@ -404,6 +405,7 @@ static void help(void)
          BLOCKS_OPT_DEFAULT);
   printf("-c --checkpoint=N  Checkpoint every N seconds (default N=%d)\n",
          CHECKPOINT_OPT_DEFAULT);
+  printf("-s --savepoint=N   Checkpoint every N minutes\n");
   printf("-q --quiet         Don't print factors to screen\n");
   printf("-r --report=N      Report status every N seconds (default N=%d)\n",
          REPORT_OPT_DEFAULT);
@@ -449,6 +451,11 @@ static int parse_option(int opt, char *arg, const char *source)
 
     case 'c':
       status = parse_uint(&checkpoint_opt,arg,0,UINT32_MAX);
+      break;
+
+    case 's':
+      status = parse_uint(&checkpoint_opt,arg,0,UINT32_MAX);
+      checkpoint_opt *= 60;
       break;
 
     case 'r':

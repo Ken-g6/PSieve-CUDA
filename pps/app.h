@@ -17,11 +17,8 @@
 
 #define APP_VERSION "cuda-0.2.3"
 
-#ifdef SEARCH_TWIN
-#define APP_PREFIX "tp"
-#else 
-#define APP_PREFIX "pp"
-#endif
+#define SEARCH_TWIN
+#define APP_PREFIX "cwp"
 #define APP_NAME APP_PREFIX"sieve"
 
 /* Number of primes to buffer between calls to app_thread_fun()
@@ -35,12 +32,12 @@
 
 #define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
 
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:M:s:T"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:T"
 
 // Add Riesel if not SEARCH_TWIN
 #ifndef SEARCH_TWIN
 #undef APP_SHORT_OPTS
-#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:M:s:R"
+#define APP_SHORT_OPTS "k:K:n:N:i:f:b:d:m:R"
 #endif
 
 #define APP_LONG_OPTS \
