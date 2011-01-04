@@ -95,6 +95,8 @@ static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
 static uint64_t r0arr[9];
 static int bbitsarr[9];
+static int b_term=0; // 0 or 2.
+static int constant_c = 0;  // -1, 1, or 0 for non-constant.
 
 struct n_subsection *thread_subsections;
 
@@ -179,10 +181,138 @@ int lg2(uint64_t v) {
   while (v >>= 1) r++;
   return r;
 }
+static void line_error(const char *msg, const char *file_name)
+{
+  fprintf(stderr, "Error in %s file: %s.",file_name, msg);
+}
 
 #define ABCDFORMATSTR "ABC $a*$b^$a$%c"
 /* Scan the input file to determine format and values for kmin,kmax,nmin,nmax.
  */
+#define MAX_LINE_LENGTH 256
+#define COMMENT_CHAR '#'
+const char *read_line(FILE *file)
+{
+  static char buf[MAX_LINE_LENGTH];
+  const char *ptr;
+
+  while ((ptr = fgets(buf,sizeof(buf),file)) != NULL)
+  {
+    while (isspace(*ptr))
+      ptr++;
+    if (*ptr != COMMENT_CHAR && *ptr != '\0')
+      break;
+  }
+
+  return ptr;
+}
+
+static void check_p(uint64_t p, const char *file_name)
+{
+  if (pmin == 0)
+    pmin = p;
+  else if (pmin != p) {
+    fprintf(stderr, "--pmin=%"PRIu64" from command line overrides pmin=%"PRIu64
+            " from `%s'\n", pmin, p, file_name);
+  }
+}
+static void check_c(int32_t c, const char *file_name)
+{
+  if (c != 1 && c != -1)
+    line_error("|c| != 1 in n*b^n+c",file_name);
+}
+
+static unsigned int read_abc_header(FILE *file)
+{
+  const char *file_name = "input";
+  const char *line;
+  uint64_t p;
+  unsigned int b, n;
+  int c;
+  char ch1, ch2, ch3, ch4;
+
+  /* Try to read header */
+  line = read_line(file);
+
+  switch (sscanf(line,"ABC $%c*$%c^$%c$%c //%*[^0-9]%"SCNu64,
+                 &ch1,&ch2,&ch3,&ch4,&p))
+  {
+    default:
+      line_error("Invalid ABC header",file_name);
+
+    case 5:
+      check_p(p,file_name);
+      /* fall through */
+
+    case 4: /* MultiSieve format */
+      if (ch1 != 'a' || ch2 != 'b' || ch3 != 'a' || ch4 != 'c')
+        line_error("Wrong ABC format",file_name);
+        line = read_line(file);
+        if(line == NULL) line_error("No data in file", file_name);
+        if (sscanf(line, "%"SCNu32" %"SCNu32" %"SCNd32,&n,&b,&c) != 3)
+          line_error("Malformed line",file_name);
+        if (b != 2) line_error("mismatched b in n*b^n+c",file_name);
+        check_c(c,file_name);
+      break;
+
+    case 1:
+      switch (sscanf(line,"ABC $%c*%"SCNu32"^$%c%"SCNd32" //%*[^0-9]%"SCNu64,
+                 &ch1,&b,&ch3,&c,&p))
+      {
+        default:
+          line_error("Invalid ABC header",file_name);
+
+        case 5:
+          check_p(p,file_name);
+          /* fall through */
+
+        case 4: /* Fixed c format */
+          if (ch1 != 'a' || ch3 != 'a')
+            line_error("Wrong ABC format",file_name);
+          if (b != 2)
+            line_error("Invalid b (not two) in n*b^n+c",file_name);
+          b_term = b;
+          check_c(c,file_name);
+          constant_c = c;
+          line = read_line(file);
+          if(line == NULL) line_error("No data in file", file_name);
+          if (sscanf(line, "%"SCNu32,&n) != 1)
+              line_error("Malformed line",file_name);
+          break;
+
+        case 3:
+          /* The "%*[+$]" allows the "+" to be ignored if present. This only
+             works because we have already determined that a number was not
+             matched in this position. */
+          switch (sscanf(line,"ABC $%c*%"SCNu32"^$%c%*[+$]%c //%*[^0-9]%"
+                         SCNu64,&ch1,&b,&ch3,&ch4,&p))
+          {
+            default:
+              line_error("Invalid ABC header",file_name);
+
+            case 5:
+              check_p(p,file_name);
+              /* fall through */
+
+            case 4: /* Variable c format */
+              if (ch1 != 'a' || ch3 != 'a' || ch4 != 'b')
+                line_error("Wrong ABC format",file_name);
+              if (b != 2)
+                line_error("Invalid b (not two) in n*b^n+c",file_name);
+              b_term = b;
+              line = read_line(file);
+              if(line == NULL) line_error("No data in file", file_name);
+              if (sscanf(line, "%"SCNu32" %"SCNd32,&n,&c) != 2)
+                line_error("Malformed line",file_name);
+              check_c(c,file_name);
+              break;
+          }
+      }
+      break;
+  }
+  return n;
+}
+
 static FILE* scan_input_file(const char *fn)
 {
   FILE *file;
@@ -195,59 +325,40 @@ static FILE* scan_input_file(const char *fn)
     perror(fn);
     bexit(ERR_FOPEN);
   }
+  n = read_abc_header(file);
 
-  if (fscanf(file,ABCDFORMATSTR,
-             &ch) == 1 && 'c' == ch)
-    file_format = FORMAT_ABCD;
-  else
-  {
-    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(),fn);
-    bexit(ERR_SCANF);
-  }
-  while(ch != '\n' && ch != '\r') ch=getc(file);
-  while(ch == '\n' || ch == '\r') ch=getc(file);
-  ungetc(ch, file);
   ch = 'c';
 
-  if (file_format == FORMAT_ABCD)
+  n0 = n1 = n;
+  while (1)
   {
-    //while(getc(file) != '\n');
-    printf("Scanning ABC file...\n");
-    if(fscanf(file,"%u 2 %d", &n, &fileaddsign) != 2) {
-      bmsg("Invalid first line in input file.\n");
-      bexit(ERR_SCANF);
-    }
-    while(ch != '\n' && ch != '\r') ch=getc(file);
-    while(ch == '\n' || ch == '\r') ch=getc(file);
-    ungetc(ch, file);
-    n0 = n1 = n;
-    while (1)
-    {
-      while(1) {
-        char c = getc(file);
-        if(!isdigit(c)) {
-          ungetc(c, file);
-          break;
-        }
-        n = c-'0';
-        while(isdigit(c=getc(file))) {
-          n *= 10;
-          n += c-'0';
-        }
-        while(c != '\n' && c != '\r') c=getc(file);
-        while(c == '\n' || c == '\r') c=getc(file);
+    while(1) {
+      // Read N.
+      char c = getc(file);
+      if(!isdigit(c)) {
         ungetc(c, file);
-      }
-      //while (fscanf(file," %u",&d) == 1)
-
-      if (n1 < n) {
-        printf("Read maximum n %u\n", n);
-        n1 = n;
-      }
-      else
         break;
+      }
+      n = c-'0';
+      while(isdigit(c=getc(file))) {
+        n *= 10;
+        n += c-'0';
+      }
+      // Skip anything else.
+      while(c != '\n' && c != '\r') c=getc(file);
+      while(c == '\n' || c == '\r') c=getc(file);
+      ungetc(c, file);
     }
+    //while (fscanf(file," %u",&d) == 1)
+
+    if (n1 < n) {
+      printf("Read maximum n %u\n", n);
+      n1 = n;
+    }
+    else
+      break;
   }
+
 
   if (ferror(file))
   {
@@ -271,7 +382,7 @@ static FILE* scan_input_file(const char *fn)
 static void read_abcd_file(const char *fn, FILE *file)
 {
   unsigned int n, count;
-  char ch;
+  char ch, sign;
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
@@ -281,21 +392,18 @@ static void read_abcd_file(const char *fn, FILE *file)
       bexit(ERR_FOPEN);
     }
   }
-  if (fscanf(file, ABCDFORMATSTR, &ch) != 1 || ch != 'c')
-  {
-    fprintf(stderr,"%sInvalid header in input file `%s'\n",bmprefix(), fn);
-    bexit(ERR_SCANF);
-  }
-  while(ch != '\n' && ch != '\r') ch=getc(file);
-  while(ch == '\n' || ch == '\r') ch=getc(file);
-  ungetc(ch, file);
+  // Skip the first line and any comments before it.
+  read_line(file);
 
   count = 0;
+  // Pre-set the sign; it's overwritten if not constant.
+  sign = (constant_c == -1)?'-':'+';
   //while(getc(file) != '\n');
   printf("Reading ABC file.\n");
   while(1)
   {
     unsigned int bit;
+    char sign;
     char c = getc(file);
     while(c == 10) c = getc(file);
     if(!isdigit(c)) {
@@ -308,15 +416,26 @@ static void read_abcd_file(const char *fn, FILE *file)
       n *= 10;
       n += c-'0';
     }
-    if(c != ' ') { fprintf(stderr, "Invalid file format, line %u\n", count+1); bexit(ERR_SCANF); }
-    c = getc(file);
-    if(c != '2') { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
-    c = getc(file);
-    if(c != ' ') { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
-    c = getc(file);
+    // Read a space before anything else.
+    if(b_term == 0 || constant_c == 0) {
+      if(c != ' ') { fprintf(stderr, "Invalid file format, line %u\n", count+1); bexit(ERR_SCANF); }
+      c = getc(file);
+    }
+
+    if(b_term == 0) {
+      // Read the base if expected.
+      if(c != '2') { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
+      c = getc(file);
+      if(c != ' ' && (constant_c == 0 || c != '\r' && c != '\n')) { fprintf(stderr, "Invalid base (not 2), line %u\n", count+1); bexit(ERR_SCANF); }
+    }
+    if(constant_c == 0) {
+      // Read the sign if expected.
+      if(c == ' ') c = getc(file);
+      sign = c;
+    }
 
     bit = n-nmin;
-    if(n >= nmin && n <= nmax) bitmap[(c=='-')?0:1][bit/8] |= (1 << bit%8);
+    if(n >= nmin && n <= nmax) bitmap[(sign=='-')?0:1][bit/8] |= (1 << bit%8);
     //printf("Read %lu*2^%d+/-1\n", k, n);
     count++;
     while(c != '\n' && c != '\r') c=getc(file);

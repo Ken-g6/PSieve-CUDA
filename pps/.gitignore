@@ -1,11 +1,19 @@
 # pps files to ignore:
 license.txt
 *.bad
+
+# Test input files
+*.abc*
+
 # - Results file:
-ppfactors.txt
+[tp]pfactors.txt
+cwpfactors.txt
+[tp]pcheck*.txt
+cwpcheck*.txt
 
 # Binaries:
 [tp]psieve-*-linux
+cwpsieve-*-linux
 
 # BOINC files:
 boinc_finish_called
