@@ -82,6 +82,8 @@ endif
 # Make-able targets:
 all: $(TPS_BINS) $(TPS_BOINC_BINS)
 
+zips: $(TPS_APPNAME).zip
+
 # Making zipfiles (requires binaries):
 
 $(TPS_APPNAME).zip: $(TPS_BINS) $(TPS_BOINC_BINS) gitstatus changes

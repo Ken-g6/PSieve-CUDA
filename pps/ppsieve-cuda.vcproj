@@ -2,7 +2,7 @@
 <VisualStudioProject
 	ProjectType="Visual C++"
 	Version="9.00"
-	Name="ppsieve-cuda"
+	Name="cwpsieve-cuda"
 	ProjectGUID="{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
 	RootNamespace="ppsievecuda"
 	Keyword="Win32Proj"
@@ -439,7 +439,7 @@
 			<Tool
 				Name="CUDA Build Rule"
 				PtxAsOptionV="true"
-				Defines="NDEBUG;SEARCH_TWIN"
+				Defines="NDEBUG"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -454,8 +454,8 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;SEARCH_TWIN"
-				RuntimeLibrary="2"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -473,7 +473,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="cudart.lib cuda.lib"
-				OutputFile="$(OutDir)\tpsieve-cuda-x86-windows.exe"
+				OutputFile="$(OutDir)\cwpsieve-cuda-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
 				GenerateDebugInformation="true"
@@ -521,7 +521,7 @@
 			<Tool
 				Name="CUDA Build Rule"
 				Include="&quot;..\boinc\lib&quot;"
-				Defines="NDEBUG;USE_BOINC;SEARCH_TWIN"
+				Defines="NDEBUG;USE_BOINC"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -537,8 +537,8 @@
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS;SEARCH_TWIN"
-				RuntimeLibrary="2"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -556,7 +556,7 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
-				OutputFile="$(OutDir)\tpsieve-cuda-boinc-x86-windows.exe"
+				OutputFile="$(OutDir)\cwpsieve-cuda-boinc-x86-windows.exe"
 				LinkIncremental="1"
 				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
 				GenerateDebugInformation="true"
