@@ -216,7 +216,7 @@ static void check_p(uint64_t p, const char *file_name)
             " from `%s'\n", pmin, p, file_name);
   }
 }
-static void check_c(int32_t c, const char *file_name)
+static void check_c(int c, const char *file_name)
 {
   if (c != 1 && c != -1)
     line_error("|c| != 1 in n*b^n+c",file_name);
@@ -249,14 +249,14 @@ static unsigned int read_abc_header(FILE *file)
         line_error("Wrong ABC format",file_name);
         line = read_line(file);
         if(line == NULL) line_error("No data in file", file_name);
-        if (sscanf(line, "%"SCNu32" %"SCNu32" %"SCNd32,&n,&b,&c) != 3)
+        if (sscanf(line, "%u %u %d",&n,&b,&c) != 3)
           line_error("Malformed line",file_name);
         if (b != 2) line_error("mismatched b in n*b^n+c",file_name);
         check_c(c,file_name);
       break;
 
     case 1:
-      switch (sscanf(line,"ABC $%c*%"SCNu32"^$%c%"SCNd32" //%*[^0-9]%"SCNu64,
+      switch (sscanf(line,"ABC $%c*%u^$%c%d //%*[^0-9]%"SCNu64,
                  &ch1,&b,&ch3,&c,&p))
       {
         default:
@@ -276,7 +276,7 @@ static unsigned int read_abc_header(FILE *file)
           constant_c = c;
           line = read_line(file);
           if(line == NULL) line_error("No data in file", file_name);
-          if (sscanf(line, "%"SCNu32,&n) != 1)
+          if (sscanf(line, "%u",&n) != 1)
               line_error("Malformed line",file_name);
           break;
 
@@ -284,7 +284,7 @@ static unsigned int read_abc_header(FILE *file)
           /* The "%*[+$]" allows the "+" to be ignored if present. This only
              works because we have already determined that a number was not
              matched in this position. */
-          switch (sscanf(line,"ABC $%c*%"SCNu32"^$%c%*[+$]%c //%*[^0-9]%"
+          switch (sscanf(line,"ABC $%c*%u^$%c%*[+$]%c //%*[^0-9]%"
                          SCNu64,&ch1,&b,&ch3,&ch4,&p))
           {
             default:
@@ -302,7 +302,7 @@ static unsigned int read_abc_header(FILE *file)
               b_term = b;
               line = read_line(file);
               if(line == NULL) line_error("No data in file", file_name);
-              if (sscanf(line, "%"SCNu32" %"SCNd32,&n,&c) != 2)
+              if (sscanf(line, "%u %d",&n,&c) != 2)
                 line_error("Malformed line",file_name);
               check_c(c,file_name);
               break;
@@ -382,7 +382,7 @@ static FILE* scan_input_file(const char *fn)
 static void read_abcd_file(const char *fn, FILE *file)
 {
   unsigned int n, count;
-  char ch, sign;
+  char sign;
 
   if(file == NULL) {
     printf("Opening file %s\n", fn);
