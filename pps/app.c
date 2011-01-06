@@ -1357,6 +1357,11 @@ void app_fini(uint64_t pstop)
 {
   unsigned int i;
 
+#ifdef USE_BOINC
+  if (pstop >= pmax && factor_count == 0) /* Ensure a non-empty factors file exists if testing is complete. */
+    fprintf(factors_file,"no factors\n");
+#endif
+
   fclose(factors_file);
 #ifdef USE_BOINC
   // If testing is complete, move the temp factors file to the BOINC filename.
