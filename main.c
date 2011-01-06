@@ -1218,7 +1218,7 @@ int main(int argc, char *argv[])
    fprintf(stderr,"\n%sSieve incomplete: %"PRIu64" <= p < %"PRIu64"\n", bmprefix(),pmin,pstop);
   }
 
-  app_fini();
+  app_fini(pstop);
 
   destroy_sieve(sv);
   free_sieve_primes();

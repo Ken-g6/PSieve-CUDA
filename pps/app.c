@@ -1254,9 +1254,14 @@ void app_write_checkpoint(FILE *fout)
 
 /* This function is called once after all threads have exited.
  */
-void app_fini(void)
+void app_fini(uint64_t pstop)
 {
   unsigned int i;
+
+#ifdef USE_BOINC
+  if (pstop >= pmax && factor_count == 0) /* Ensure a non-empty factors file exists if testing is complete. */
+    fprintf(factors_file,"no factors\n");
+#endif
 
   fclose(factors_file);
   printf("Found %u factor%s\n",factor_count,(factor_count==1)? "":"s");
