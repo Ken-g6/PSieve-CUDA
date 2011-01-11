@@ -15,6 +15,9 @@
 #include <string.h>
 #include <ctype.h>
 #include "main.h"
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #ifdef _WIN32
 #include <windows.h>
 #include "getopt.h"
@@ -22,6 +25,7 @@
 #include "inttypes.h"
 #else
 #include <getopt.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <inttypes.h>
 #ifndef SINGLE_THREAD
@@ -736,11 +740,17 @@ void app_init(void)
 
   if (factors_filename == NULL)
     factors_filename = FACTORS_FILENAME_DEFAULT;
-  if ((factors_file = bfopen(factors_filename,"a")) == NULL)
-  {
+#ifdef USE_BOINC
+  if ((factors_file = fopen(FACTORS_TEMP_FILENAME_DEFAULT,"a")) == NULL) {
+    fprintf(stderr,"%sCannot open temp factors file `%s'\n",bmprefix(),FACTORS_TEMP_FILENAME_DEFAULT);
+    bexit(ERR_FOPEN);
+  }
+#else
+  if ((factors_file = fopen(factors_filename,"a")) == NULL) {
     fprintf(stderr,"%sCannot open factors file `%s'\n",bmprefix(),factors_filename);
     bexit(ERR_FOPEN);
   }
+#endif
 
   // Allocate the bitsskip arrays.
   /*
@@ -1298,6 +1308,21 @@ int app_read_checkpoint(FILE *fin)
   if (n0 != nmin || n1 != nmax)
     return 0;
 
+  // Verify that there is a non-empty factors file if factor_count > 0.  If not, don't use this checkpoint.
+  if(factor_count > 0) {
+#ifdef _WIN32
+    struct _stat st;
+    _fstat(fileno(factors_file), &st);
+#else
+    struct stat st;
+    fstat(fileno(factors_file), &st);
+#endif
+    if(st.st_size == 0) {
+      bmsg("Factors file missing.  Restarting test.\n");
+      return 0;
+    }
+  }
+
   return 1;
 }
 
@@ -1326,6 +1351,13 @@ void app_fini(void)
   unsigned int i;
 
   fclose(factors_file);
+#ifdef USE_BOINC
+  // If testing is complete, move the temp factors file to the BOINC filename.
+  if(pstop >= pmax && bmove(FACTORS_TEMP_FILENAME_DEFAULT, factors_filename)) {
+    fprintf(stderr, "Error: Couldn't move temp factors file to %s\n", factors_filename);
+    bexit(ERR_FOPEN);
+  }
+#endif
   printf("Found %u factor%s\n",factor_count,(factor_count==1)? "":"s");
 
 #ifndef SINGLE_THREAD
