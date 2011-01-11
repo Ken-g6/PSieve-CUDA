@@ -81,7 +81,7 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int ct
 void app_thread_fini(int th);
 int app_read_checkpoint(FILE *f);
 void app_write_checkpoint(FILE *f);
-void app_fini(void);
+void app_fini(uint64_t pstop);
 #ifdef __cplusplus
 extern "C" {
 #endif

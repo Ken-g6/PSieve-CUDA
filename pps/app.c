@@ -1346,7 +1346,7 @@ void app_write_checkpoint(FILE *fout)
 
 /* This function is called once after all threads have exited.
  */
-void app_fini(void)
+void app_fini(uint64_t pstop)
 {
   unsigned int i;
 
