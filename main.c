@@ -187,6 +187,11 @@ FILE* bfopen(const char *filename, const char *mode) {
   if(boinc_resolve_filename(filename, resolved_name, 512)) return NULL;
   return boinc_fopen(resolved_name, mode);
 }
+int bmove(const char *file1, const char *file2) {
+  char resolved_name[512];
+  if(boinc_resolve_filename(file2, resolved_name, 512)) return NULL;
+  return rename(file1, resolved_name);
+}
 void bmsg(const char *msg) {
   //fprintf(stderr, "%s %s", boinc_msg_prefix(), msg);
   fprintf(stderr, "%s", msg);
@@ -1213,7 +1218,7 @@ int main(int argc, char *argv[])
    fprintf(stderr,"\n%sSieve incomplete: %"PRIu64" <= p < %"PRIu64"\n", bmprefix(),pmin,pstop);
   }
 
-  app_fini();
+  app_fini(pstop);
 
   destroy_sieve(sv);
   free_sieve_primes();

@@ -49,6 +49,7 @@
 extern "C" {
 #endif
 FILE* bfopen(const char *filename, const char *mode);
+int bmove(const char *file1, const char *file2);
 void bmsg(const char *msg);
 char* bmprefix();
 void bexit(int status);
