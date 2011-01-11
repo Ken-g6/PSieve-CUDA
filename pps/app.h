@@ -18,7 +18,7 @@
 #ifndef USE_OPENCL
 #define APP_VERSION "cuda-0.2.1a"
 #else
-#define APP_VERSION "cl-0.2.3c"
+#define APP_VERSION "cl-0.2.3d"
 #endif
 
 #ifdef SEARCH_TWIN
