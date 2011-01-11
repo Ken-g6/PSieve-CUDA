@@ -1236,10 +1236,16 @@ int app_read_checkpoint(FILE *fin)
   unsigned int n0, n1;
 
   if (fscanf(fin,"nmin=%u,nmax=%u,factor_count=%u",&n0,&n1,&factor_count) != 3)
+  {
+    factor_count = 0;
     return 0;
+  }
 
   if (n0 != nmin || n1 != nmax)
+  {
+    factor_count = 0;
     return 0;
+  }
 
   // Verify that there is a non-empty factors file if factor_count > 0.  If not, don't use this checkpoint.
   if(factor_count > 0) {
@@ -1252,6 +1258,7 @@ int app_read_checkpoint(FILE *fin)
 #endif
     if(st.st_size == 0) {
       bmsg("Factors file missing.  Restarting test.\n");
+      factor_count = 0;
       return 0;
     }
   }
