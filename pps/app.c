@@ -41,7 +41,6 @@
 #endif
 #include "putil.h"
 #include "app.h"
-#include "appcu.h"
 #include "clock.h"
 #include "factor_proth.h"
 #ifdef __GCC__
@@ -102,15 +101,16 @@ int *check_ns_delay;
 //static unsigned int bitsmask, bpernstep;
 static uint64_t* gpu_started;
 //static uint64_t** bitsskip;
-static unsigned char** factor_found;
 static int device_opt = -1;
 static unsigned int user_cthread_count = 0;
-static uint64_t r0arr[9];
-static int bbitsarr[9];
 static unsigned int kstep = KSTEP;
 static unsigned int koffset = KOFFSET;
+static unsigned int d_mont_nstep;
 
-struct n_subsection *thread_subsections;
+// Vars from appcu.cu:
+static unsigned int ld_nstep;
+static int ld_bbits;
+static uint64_t ld_r0;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -710,6 +710,7 @@ void app_init(void)
   for (nstep = 1; (kmax << nstep) < pmin; nstep++)
     ;
   ld_nstep = nstep;
+  d_mont_nstep = 32-ld_nstep;
   // Calculate the values that fit the given bitsatatime.
   /*
   if (nstep > bitsatatime) {
@@ -765,16 +766,57 @@ void app_init(void)
   check_ns_delay = xmalloc(num_threads*sizeof(int));
   for(i=0; i < (unsigned int)num_threads; i++) check_ns_delay[i] = 0;
 
-  factor_found = xmalloc(num_threads*sizeof(unsigned char*));
   gpu_started = xmalloc(num_threads*sizeof(uint64_t));
   for(i=0; i < (unsigned int)num_threads; i++) {
     gpu_started[i] = (uint64_t)0;
   }
 
-  // Allocate the N subsections for each thread.
-  thread_subsections = xmalloc(num_threads*sizeof(struct n_subsection));
+  if (ld_nstep > (nmax-nmin+1))
+    ld_nstep = (nmax-nmin+1);
 
-  cuda_init();
+  //assert((1ul << (64-nstep)) < pmin);
+  if((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+    uint64_t pmin_1 = (((uint64_t)1) << (64-ld_nstep));
+    bmsg("Error: pmin is not large enough (or nmax is close to nmin).\n");
+    //cuda_finalize();
+    while((((uint64_t)1) << (64-ld_nstep)) > pmin) {
+      pmin *= 2;
+      ld_nstep++;
+    }
+    if(pmin_1 < pmin) pmin = pmin_1;
+#ifndef _WIN32
+    fprintf(stderr, "This program will work by the time pmin == %lu.\n", pmin);
+#endif
+    bexit(ERR_INVALID_PARAM);
+  }
+#ifdef SEARCH_TWIN
+  // For TPS, decrease the ld_nstep by one to allow overlap, checking both + and -.
+  ld_nstep--;
+#endif
+  // Use the 32-step algorithm where useful.
+  if(ld_nstep >= 32 && (((uint64_t)1) << 32) <= pmin) {
+    if(ld_nstep != 32) printf("nstep changed to 32\n");
+    ld_nstep = 32;
+  } else {
+#ifdef SEARCH_TWIN
+    printf("Changed nstep to %u\n", ld_nstep);
+#else
+    printf("Didn't change nstep from %u\n", ld_nstep);
+#endif
+  }
+
+  ld_bbits = lg2(nmin);
+  //assert(d_r0 <= 32);
+  if(ld_bbits < 6) {
+    fprintf(stderr, "%sError: nmin too small at %d (must be at least 64).\n", bmprefix(), nmin);
+    //cuda_finalize();
+    bexit(ERR_INVALID_PARAM);
+  }
+  // r = 2^-i * 2^64 (mod N), something that can be done in a uint64_t!
+  // If i is large (and it should be at least >= 32), there's a very good chance no mod is needed!
+  ld_r0 = ((uint64_t)1) << (64-(nmin >> (ld_bbits-5)));
+
+  ld_bbits = ld_bbits-6;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -789,8 +831,6 @@ void app_init(void)
   fflush(stdout);
 }
 
-// Replacing the getter in appcu.cu with a macro.
-#define get_n_subsection_start(X) thread_subsections[th].n_subsection_start[X]
 /* This function is called once in thread th, 0 <= th < num_threads, before
    the first call to app_thread_fun(th, ...).
  */
@@ -798,50 +838,15 @@ unsigned int app_thread_init(int th)
 {
   unsigned int i, cthread_count;
 
-  if(device_opt >= 0) {
-    cthread_count = cuda_app_init(device_opt, th, user_cthread_count);
-  } else {
-    cthread_count = cuda_app_init(th, th, user_cthread_count);
-  }
-  // Create r0arr (which gives starting values for the REDC code.)
-  //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);
-  for(i=0; i < 8; i++) {
-    int l_bbits;
-    unsigned int n = get_n_subsection_start(i+1);
-    l_bbits = lg2(n);
-
-    bbitsarr[i] = l_bbits - 6;
-    r0arr[i] = ((uint64_t)1) << (64-(n >> (l_bbits-5)));
-    //printf("r0arr[%d] = %lu\n", n, r0arr[i]);
-  }
-
-  // Allocate the factor_found arrays.
-  if(cthread_count > 0) {
-    factor_found[th] = xmalloc(cthread_count*sizeof(unsigned char));
-    for(i=0; i < cthread_count; i++) {
-      factor_found[th][i] = 0;
-    }
-  } else factor_found[th] = NULL;
+  cthread_count = 8; //cuda_app_init(th, th, user_cthread_count);
 
   return cthread_count;
 }
 
 /*  Multiplies for REDC code  */
 
-#if defined(GCC) && defined(__x86_64__)
-static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
-{
-  uint64_t t1, t2;
-  __asm__
-  ( "mulq %3\n\t"
-    : "=a" (t1), "=d" (t2)
-    : "0" (a), "rm" (b)
-    : "cc");
-  return t2;
-}
-#else
-#if defined(GCC) && !defined(__x86_64__)
-static unsigned int __umulhi(const unsigned int a, const unsigned int b)
+#if defined(GCC) && !defined(__x86_64__) && defined(__i386__)
+INLINE unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   unsigned int t1, t2;
   __asm__
@@ -851,7 +856,7 @@ static unsigned int __umulhi(const unsigned int a, const unsigned int b)
     : "cc");
   return t2;
 }
-static uint64_t __umul64(const unsigned int a, const unsigned int b)
+INLINE uint64_t __umul64(const unsigned int a, const unsigned int b)
 {
   unsigned int t1, t2;
   __asm__
@@ -861,16 +866,24 @@ static uint64_t __umul64(const unsigned int a, const unsigned int b)
     : "cc");
   return (((uint64_t)t2)<<32)+t1;
 }
+INLINE void __umad64(const unsigned int a, const unsigned int b, uint64_t *c)
+{
+  *c += __umul64(a, b);
+}
 #else
-static unsigned int __umulhi(const unsigned int a, const unsigned int b)
+INLINE unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   uint64_t c = (uint64_t)a * (uint64_t)b;
 
   return (unsigned int)(c >> 32);
 }
-static uint64_t __umul64(const unsigned int a, const unsigned int b)
+INLINE uint64_t __umul64(const unsigned int a, const unsigned int b)
 {
   return (uint64_t)a * (uint64_t)b;
+}
+INLINE void __umad64(const unsigned int a, const unsigned int b, uint64_t *c)
+{
+  *c += (uint64_t)a * (uint64_t)b;
 }
 #endif
 
@@ -888,7 +901,6 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
 
   return __umul64(a_hi, b_hi) + (m1 >> 32) + (m2 >> 32) + carry;
 }
-#endif
 
 /*  BEGIN REDC CODE  */
 
@@ -960,35 +972,10 @@ static uint64_t mod_REDC(const uint64_t a, const uint64_t N, const uint64_t Ns) 
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
-static uint64_t shiftmod_REDC (const uint64_t a, 
-             const uint64_t N, uint64_t rax)
-{
-  uint64_t rcx;
-  unsigned int d_mont_nstep = 64-ld_nstep;
-
-  rax <<= d_mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
-  rcx = a >> ld_nstep;
-  rcx += (rax!=0)?1:0;
-  rax = __umul64hi(rax, N) + rcx;
-  rcx = rax - N;
-  rax = (rax>N)?rcx:rax;
-
-#ifdef DEBUG64
-  if (longmod (rax, 0, N) != mulmod(a, ((uint64_t)1)<<d_mont_nstep, N))
-  {
-    fprintf (stderr, "%sError, shiftredc(%lu,%u,%lu) = %lu\n", bmprefix(), a, d_mont_nstep, N, rax);
-    bexit(ERR_NEG);
-  }
-#endif
-
-  return rax;
-}
-// Same function, but for 32 bits or less nstep.
+// For 32 bits or less nstep only!
 static uint64_t shiftmod_REDC_sm (uint64_t rcx, 
              const uint64_t N, unsigned int rax)
 {
-  unsigned int d_mont_nstep = 32-ld_nstep;
-
   rax <<= d_mont_nstep; // So this is (a*Ns*(1<<s) == (a<<s)*Ns) >> 32.
   rcx >>= ld_nstep;
   rcx += __umulhi(rax, (unsigned int)N) + ((rax!=0)?1:0);
@@ -1034,92 +1021,6 @@ static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const uns
   return r;
 }
 
-void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
-  unsigned int n = l_nmin; // = nmin;
-  unsigned int i;
-  uint64_t k0, kPs;
-  uint64_t kpos;
-//#ifdef SEARCH_TWIN
-  //uint64_t kneg;
-//#endif
-  uint64_t Ps;
-  int cands_found = 0;
-
-  //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
-  
-  // Better get this done before the first mulmod.
-  Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
-  
-  // Calculate k0, in Montgomery form.
-  k0 = invpowmod_REDClr(my_P, Ps, l_nmin, r0, l_bbits);
-  //printf("k0[%u] = %lu\n", l_nmin, k0);
-
-  //if(my_P == 42070000070587) printf("%lu^-1 = %lu (CPU)\n", my_P, Ps);
-  /*
-  // Verify the first result.
-  kpos = 1;
-  for(i=0; i < l_nmin; i++) {
-      kpos += (kpos&1)?my_P:0;
-      kpos >>= 1;
-  }
-  kPs = k0 * Ps;
-  assert(kpos == onemod_REDC(my_P, kPs));
-  if(kpos != onemod_REDC(my_P, kPs)) {
-    fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
-    //bexit(ERR_NEG);
-  } */
-#ifdef SEARCH_TWIN
-    // Select the first odd one.  All others are tested by overlap.
-    kpos = (k0&1)?k0:(my_P - k0);
-    if (kpos <= kmax && kpos >= kmin) {
-      cands_found++;
-      test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
-    }
-#endif
-
-#ifndef SEARCH_TWIN
-  if(search_proth == 1) k0 = my_P-k0;
-#endif
-
-  do { // Remaining steps are all of equal size nstep
-    // Get K from the Montgomery form.
-    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = __umul64(k0, Ps);
-    kpos = k0;
-#ifdef SEARCH_TWIN
-    // Select the even one.
-    kpos = (kpos&1)?(my_P - kpos):kpos;
-#endif
-    //i = __ffsll(kpos)-1;
-    //i = __builtin_ctzll(kpos);
-    BSFQ(i, kpos, 1);
-
-#ifdef SEARCH_TWIN
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
-#else
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
-#endif
-      cands_found++;
-      //if (i < ld_nstep)
-#ifdef SEARCH_TWIN
-        test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
-#else
-        test_factor(my_P,(kpos>>i),n+i,search_proth);
-#endif
-    }
-
-    // Proceed to the K for the next N.
-    n += ld_nstep;
-    k0 = shiftmod_REDC(k0, my_P, kPs);
-  } while (n < l_nmax);
-  if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
-#ifdef USE_BOINC
-    bexit(ERR_NEG);
-#endif
-  }
-}
-
 void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
   unsigned int n = l_nmin; // = nmin;
   unsigned int i;
@@ -1129,7 +1030,6 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
   //uint64_t kneg;
 //#endif
   uint64_t Ps;
-  int cands_found = 0;
 
   //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
   
@@ -1145,7 +1045,6 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
     // Select the first odd one.  All others are tested by overlap.
     kpos = (k0&1)?k0:(my_P - k0);
     if (kpos <= kmax && kpos >= kmin) {
-      cands_found++;
       test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
     }
 #endif
@@ -1171,7 +1070,6 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
 #else
     if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
 #endif
-      cands_found++;
       //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
         test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
@@ -1186,35 +1084,18 @@ void test_one_p_sm(const uint64_t my_P, const unsigned int l_nmin, const unsigne
     k0 = shiftmod_REDC_sm(k0, my_P, ((unsigned int)k0)*((unsigned int)Ps));
     //if(kpos != k0) printf("Expected k0=%lu, but got %lu!\n", kpos, k0);
   } while (n < l_nmax);
-  if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64".\n", bmprefix(), my_P);
-#ifdef USE_BOINC
-    bexit(ERR_NEG);
-#endif
-  }
 }
 
 INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned int cthread_count) {
-  unsigned int i, j;
-  char factorlist;
+  unsigned int i; //, j;
+  //char factorlist;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
   for(i=0; i < cthread_count; i++) {
-    if((factorlist=factor_found[th][i]) != 0) {
-      // Test that P, at the location(s) specified.
-      for(j=0; j < 8; j++) {
-        //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
-        if(factorlist & 1) {
-#ifndef __x86_64__
-          if(nstep <= 32) 
-            test_one_p_sm(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
-          else
-#endif
-            test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
-        }
-        factorlist >>= 1;
-      }
-    }
+    //if(nstep <= 32) 
+      test_one_p_sm(P[i], nmin, nmax, ld_r0, ld_bbits);
+    //else
+      //test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
   }
 }
 
@@ -1223,30 +1104,10 @@ INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned 
 */
 void app_thread_fun(int th, const uint64_t *P, uint64_t *lastP, const unsigned int cthread_count)
 {
-  unsigned int i;
-  uint64_t new_start_time;
+  //unsigned int i;
+  //uint64_t new_start_time;
 
-  // If there was a kernel running, get its results first.
-  if(gpu_started[th] != (uint64_t)0) {
-    //printf("Getting factors from iteration at %d\n", gpu_started[th]);
-    get_factors_found(factor_found[th], cthread_count, gpu_started[th], &check_ns_delay[th]);
-  }
-
-  // Start the next kernel.
-  check_ns(P, cthread_count, th);
-  new_start_time = elapsed_usec();
-  //printf("Checking N's for iteration starting at %d with P=%lu\n", new_start_time, P[0]);
-
-  if(gpu_started[th] != (uint64_t)0) {
-    check_factors_found(th, lastP, cthread_count);
-    //printf("Checking factors for iteration starting at %d with P=%lu\n", gpu_started[th], lastP[0]);
-  }
-
-  // Copy the new P's over the old.
-  for(i=0; i < cthread_count; i++) {
-    lastP[i] = P[i];
-  }
-  gpu_started[th] = new_start_time;
+  check_factors_found(th, P, cthread_count);
 }
 
 /* This function is called 0 or more times in thread th, 0 <= th < num_threads.
@@ -1271,18 +1132,6 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int ct
 
     app_thread_fun(th,P,lastP, cthread_count);
   }
-  // Finish the last kernel.
-  if(gpu_started[th] != (uint64_t)0) {
-#ifdef TRACE
-    printf("Getting factors from iteration at %d\n", (unsigned int)gpu_started[th]);
-#endif
-    get_factors_found(factor_found[th], cthread_count, gpu_started[th], &check_ns_delay[th]);
-#ifdef TRACE
-    printf("Checking factors for iteration starting at %d with P=%lu\n", (unsigned int)gpu_started[th], lastP[0]);
-#endif
-    check_factors_found(th, lastP, cthread_count);
-    gpu_started[th] = (uint64_t)0;
-  }
 }
 
 /* This function is called once in thread th, 0 <= th < num_threads, after
@@ -1290,7 +1139,7 @@ void app_thread_fun1(int th, uint64_t *P, uint64_t *lastP, const unsigned int ct
 */
 void app_thread_fini(int th)
 {
-  cuda_finalize();
+  //cuda_finalize();
 }
 
 /* This function is called at most once, after app_init() but before any
@@ -1386,8 +1235,4 @@ void app_fini(uint64_t pstop)
     //free(bitsskip[i]);
   //}
   //free(bitsskip);
-  for(i=0; i < (unsigned int)num_threads; i++) {
-    if(factor_found[i] != NULL) free(factor_found[i]);
-  }
-  free(factor_found);
 }

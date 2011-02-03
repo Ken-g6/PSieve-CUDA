@@ -44,7 +44,6 @@
 #include "putil.h"
 
 #include "app.h"
-#include "appcu.h"
 #ifdef USE_BOINC
 #ifdef _WIN32                //  Stuff we only need on Windows: 
 #include "boinc_win.h"
@@ -728,10 +727,11 @@ static void *thread_fun(void *arg)
     //fprintf(stderr,"Malloc 1 done.\n",th);
 
     // Create the K array, to match the P array.
+    /*
     K0 = (uint64_t*)xmalloc((cthread_count+2)*sizeof(uint64_t));
     P1 = (unsigned char*)K0;
-    while((((unsigned long)P1) & 15) != 0) P1++; /* set stack alignment */
-    K = (uint64_t*) P1;
+    while((((unsigned long)P1) & 15) != 0) P1++; // set stack alignment
+    K = (uint64_t*) P1; */
     //fprintf(stderr,"Malloc 2 done.\n",th);
     while (!stopping)
     {
@@ -767,7 +767,7 @@ static void *thread_fun(void *arg)
           sum += p;
           P[plen++] = p;
           if (plen == cthread_count) {
-            app_thread_fun(th,P,K,cthread_count);
+            app_thread_fun(th,P,NULL,cthread_count);
             plen = 0;
 #ifdef SINGLE_THREAD
             good_break_point = 1;
