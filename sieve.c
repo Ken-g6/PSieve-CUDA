@@ -11,7 +11,7 @@
    (at your option) any later version.
 */
 
-#include <assert.h>
+//#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +19,7 @@
 #include "inttypes.h"
 #include <math.h>
 #include "putil.h"
+#include "bassert.h"
 #include "sieve.h"
 
 
