@@ -63,7 +63,7 @@ BOINC_LOAD_LIBS = -I$(BOINC_DIR) -I$(BOINC_LIB_DIR) -I$(BOINC_API_DIR)
 BOINC_LINK_LIBS = -L$(BOINC_DIR) -L$(BOINC_LIB_DIR) -L$(BOINC_API_DIR)
 else
 # This line includes where some repositories put the BOINC includes:
-BOINC_LOAD_LIBS = -I/usr/include/BOINC
+BOINC_LOAD_LIBS = -I/usr/include/boinc
 endif
 BOINC_CFLAGS = -DUSE_BOINC $(CFLAGS) $(BOINC_LOAD_LIBS)
 BOINC_NVCFLAGS = -DUSE_BOINC $(NVCFLAGS) $(BOINC_LOAD_LIBS)

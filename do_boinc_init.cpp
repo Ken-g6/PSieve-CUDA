@@ -14,8 +14,8 @@
 #include "diagnostics.h"
 #include "filesys.h"
 #else
-#include "BOINC/boinc_api.h"
-#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
+#include "boinc_api.h"
+#include "diagnostics.h"     // boinc_init_diagnostics()
 #endif
 #include "main.h"
 #include "do_boinc_init.h"
