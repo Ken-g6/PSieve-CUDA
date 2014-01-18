@@ -236,7 +236,7 @@ tpappcu.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 
 # BOINC_OBJS
 ../do_boinc_init.o: ../do_boinc_init.cpp ../do_boinc_init.h
-	$(NVCC) -c -m32 -o $@ $(BOINC_NVCFLAGS) $<
+	$(CXX) -c -m32 -o $@ $(BOINC_CFLAGS) $<
 
 ../main_boinc.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
 	$(CC32) -o $@ $(BOINC_CFLAGS) $<
@@ -318,7 +318,7 @@ tpappcu64.o: appcu.cu appcu.h app.h ../main.h ../putil.h cuda_sleep_memcpy.h
 
 # BOINC_OBJS64
 ../do_boinc_init64.o: ../do_boinc_init.cpp ../do_boinc_init.h
-	$(NVCC) -c -m64 -o $@ $(BOINC_NVCFLAGS) $<
+	$(CXX) -c -m64 -o $@ $(BOINC_CFLAGS) $<
 
 ../main_boinc64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h appcu.h
 	$(CC64) -o $@ $(BOINC_CFLAGS) $<
