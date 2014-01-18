@@ -262,7 +262,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 
   //i = get_global_id(0);
   //factor_found_arr[i] = 0;
-  VSTORE(0, i, factor_found_arr);
+  VSTORE((VINT)0, i, factor_found_arr);
   //Ps[i] = my_Ps;
   VSTORE(my_Ps, i, Ps);
   //K[i] = k0;
@@ -298,7 +298,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 
   //i = get_global_id(0);
   //factor_found_arr[i] = 0;
-  VSTORE(0, i, factor_found_arr);
+  VSTORE(VINT(0), i, factor_found_arr);
   //Ps[i] = my_Ps;
   VSTORE(my_Ps, i, Ps);
   //K[i] = k0;

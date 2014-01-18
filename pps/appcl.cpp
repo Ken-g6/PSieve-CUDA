@@ -405,8 +405,18 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       &compute_units,
       NULL);
 
+
   fprintf(stderr, "%sDetected %d multiprocessors (%d SPUs) on device %d.\n",
       bmprefix(), compute_units*16, compute_units*16*5, deviceno);
+
+  char vendor[1024];
+  clGetDeviceInfo(devices[deviceno], CL_DEVICE_VENDOR,sizeof(vendor), vendor, NULL);
+  char name[1024];
+  clGetDeviceInfo(devices[deviceno], CL_DEVICE_NAME,sizeof(name), name, NULL);
+
+
+  fprintf(stderr, "%sDevice %d is a %s %s.\n",
+      bmprefix(), deviceno, vendor, name);
   // Make it 8 wavefronts per SIMD by default.
   if(*cthread_count == 0) *cthread_count = 8;
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
