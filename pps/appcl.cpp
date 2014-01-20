@@ -705,10 +705,17 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
           n_subsection_start[i] = n_subsection_start[i+1];
       }
     }
+    // Make sure bit 0 is the highest.
+    if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
+    n_subsection_start[0] = nmax;
+    j = ld_nstep;
+    if(ld_nstep == 32 || ld_nstep == 22) j = 64;
+    n_subsection_start[0] -= nmin;
+    n_subsection_start[0] /= j;
+    n_subsection_start[0] *= j;
+    n_subsection_start[0] += nmin;
+    if(n_subsection_start[0] < nmax) n_subsection_start[0] += j;
   }
-  // Make sure bit 0 is the highest.
-  if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
-  n_subsection_start[0] = nmax;
 /*
   printf("Listing N subsections created:\n");
   for(i=0; &n_subsection_start[i] != first_n_subsection; i++)

@@ -830,9 +830,9 @@ unsigned int app_thread_init(int th)
   }
   // Create r0arr (which gives starting values for the REDC code.)
   //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);
-  for(i=0; i < 8; i++) {
+  for(i=0; i < 9; i++) {
     int l_bbits;
-    unsigned int n = get_n_subsection_start(i+1);
+    unsigned int n = get_n_subsection_start(i);
     l_bbits = lg2(n);
 
     bbitsarr[i] = l_bbits - 6;
@@ -1048,7 +1048,7 @@ static uint64_t invpowmod_REDClr (const uint64_t N, const uint64_t Ns, const uns
   return r;
 }
 
-void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits) {
+int test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned int l_nmax, const uint64_t r0, const int l_bbits, const uint64_t r1, const int bbits1, const int retries) {
   unsigned int n = l_nmin; // = nmin;
   unsigned int i;
   uint64_t k0, kPs;
@@ -1057,10 +1057,10 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
   int cands_found = 0;
 
   //printf("I think it found %lu divides N in {%u, %u}\n", my_P, l_nmin, l_nmax);
-  
+
   // Better get this done before the first mulmod.
   Ps = -invmod2pow_ul (my_P); /* Ns = -N^{-1} % 2^64 */
-  
+
   // Calculate k0, in Montgomery form.
   k0 = invpowmod_REDClr(my_P, Ps, l_nmin, r0, l_bbits);
   //printf("k0[%u] = %lu\n", l_nmin, k0);
@@ -1070,22 +1070,22 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
   // Verify the first result.
   kpos = 1;
   for(i=0; i < l_nmin; i++) {
-      kpos += (kpos&1)?my_P:0;
-      kpos >>= 1;
+  kpos += (kpos&1)?my_P:0;
+  kpos >>= 1;
   }
   kPs = k0 * Ps;
   assert(kpos == onemod_REDC(my_P, kPs));
   if(kpos != onemod_REDC(my_P, kPs)) {
-    fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
-    //bexit(ERR_NEG);
+  fprintf(stderr, "Error: %lu != %lu!\n", kpos, onemod_REDC(my_P, kPs));
+  //bexit(ERR_NEG);
   } */
 #ifdef SEARCH_TWIN
-    // Select the first odd one.  All others are tested by overlap.
-    kpos = (k0&1)?k0:(my_P - k0);
-    if (kpos <= kmax && kpos >= kmin) {
-      cands_found++;
-      test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
-    }
+  // Select the first odd one.  All others are tested by overlap.
+  kpos = (k0&1)?k0:(my_P - k0);
+  if (kpos <= kmax && kpos >= kmin) {
+    cands_found++;
+    test_factor(my_P,kpos,n,(kpos==k0)?-1:1);
+  }
 #endif
 
 #ifndef SEARCH_TWIN
@@ -1106,16 +1106,17 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     BSFQ(i, kpos, 1);
 
 #ifdef SEARCH_TWIN
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep) {
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep)
 #else
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep) {
+    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep)
 #endif
+    {
       cands_found++;
       //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
-        test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
+      test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
-        test_factor(my_P,(kpos>>i),n+i,search_proth);
+      test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
     }
 
@@ -1123,30 +1124,60 @@ void test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned i
     k0 = shiftmod_REDC(k0, my_P, kPs);
     n += ld_nstep;
   } while (n < l_nmax);
-  if(cands_found == 0) {
-    fprintf(stderr, "%sComputation Error: no candidates found for p=%"PRIu64" between %u and %u.\n", bmprefix(), my_P, l_nmin, l_nmax);
-#ifdef USE_BOINC
-    bexit(ERR_NEG);
-#endif
+  kpos = invpowmod_REDClr(my_P, Ps, n, r1, bbits1);
+  if(kpos != k0) {
+    fprintf(stderr, "%sComputation Error %d of 3: CPU checksum mismatch for p=%"PRIu64" between %u and %u.\n", bmprefix(), retries+1, my_P, l_nmin, l_nmax);
+    if(retries < 2) {
+      return(test_one_p(my_P, l_nmin, l_nmax, r0, l_bbits, r1, bbits1, retries+1));
+    } else {
+      fprintf(stderr, "%sAborting because the CPU could not sieve correctly.\n", bmprefix());
+      bexit(ERR_NEG);
+    }
   }
+
+  return(cands_found);
+
 }
 
 INLINE void check_factors_found(const int th, const uint64_t *P, const unsigned int cthread_count) {
   unsigned int i, j;
-  char factorlist;
+  unsigned int factorlist, retries = 0, k0sum;
   //fprintf(stderr, "Checking factors starting with P=%llu\n", P[0]);
   // Check the previous results.
   for(i=0; i < cthread_count; i++) {
-    if((factorlist=factor_found[th][i]) != 0) {
+    k0sum = 0;
+    if((factorlist=factor_found[th][i] & 0xFF) != 0) {
       // Test that P, at the location(s) specified.
       for(j=0; j < 8; j++) {
         //if(factorlist & 1) test_one_p(P[i], nmin, get_n_subsection_start(j), ld_r0, ld_bbits);
         if(factorlist & 1) {
           //printf("Checking for factor in section %u.\n", j);
-          test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j], bbitsarr[j]);
+          int cands_found = test_one_p(P[i], get_n_subsection_start(j+1), get_n_subsection_start(j), r0arr[j+1], bbitsarr[j+1], r0arr[j], bbitsarr[j], 0);
+          if(cands_found == 0) {
+            fprintf(stderr, "%sComputation Error: No candidates found for p=%"PRIu64" between %u and %u.\n", bmprefix(), P[i], get_n_subsection_start(j+1), get_n_subsection_start(j));
+            // Retry the test on the CPU.
+            k0sum = 0xFFFFFFF; // A 28-bit checksum can never match a 24-bit checksum.
+          }
         }
         factorlist >>= 1;
       }
+    }
+    factorlist = factor_found[th][i] >> 8;
+    if(k0sum == 0) {
+      uint64_t Ps = -invmod2pow_ul (P[i]); /* Ns = -N^{-1} % 2^64 */
+      // Get a checksum of what the last k value should have been.  It's a checksum because it's just the lower 24 bits.
+      k0sum = (unsigned int)invpowmod_REDClr(P[i], Ps, get_n_subsection_start(0), r0arr[0], bbitsarr[0]);
+      k0sum &= 0xFFFFFF;
+    }
+    if(k0sum != factorlist) {
+      fprintf(stderr, "%sComputation Error: Checksum mismatch for p=%"PRIu64" between %u and %u at n=%u.\n", bmprefix(), P[i], k0sum, factorlist, get_n_subsection_start(0));
+      if(retries << 3 >= cthread_count) {
+        fprintf(stderr, "%sAborting because over 1 in 8 p's had computation errors: %d of %d.\n", bmprefix(), retries, i);
+        bexit(ERR_NEG);
+      }
+      // Otherwise, we just redo the computation on the CPU.
+      test_one_p(P[i], get_n_subsection_start(8), get_n_subsection_start(0), r0arr[8], bbitsarr[8], r0arr[0], bbitsarr[0], 0);
+      retries++;
     }
   }
 }
