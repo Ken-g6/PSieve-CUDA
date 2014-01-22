@@ -207,6 +207,7 @@ VLONG shiftmod_REDC32 (VLONG rcx, const VLONG N, const VINT rax)
 
   // And the rest is normal, but squashed.
   rcx = (rcx>N)?(rcx-N):rcx;
+  return rcx;
 }
 #endif
 #if D_NSTEP < 32
@@ -231,6 +232,7 @@ VLONG shiftmod_REDCsm (VLONG rcx, const VLONG N, VINT rax)
 
   // And the rest is normal, but squashed.
   rcx = (rcx>N)?(rcx-N):rcx;
+  return rcx;
 }
 #endif
 
