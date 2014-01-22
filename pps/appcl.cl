@@ -26,6 +26,14 @@
 #define VECSIZE 2
 */
 
+#if VECSIZE == 1
+#define VLONG ulong
+#define VSIGNED_LONG long
+#define VINT uint
+#define VECTORIZE(x) (x)
+#define V2VINT(x) ((uint)(x))
+#define V2VLONG(x) ((ulong)(x))
+#else
 #define VECSIZEIT2(x,y) x##y
 #define VECSIZEIT(x,y) VECSIZEIT2(x,y)
 #define VLONG VECSIZEIT(ulong, VECSIZE)
@@ -40,6 +48,7 @@
 #endif
 #define V2VINT(x) VECSIZEIT(convert_uint, VECSIZE)(x)
 #define V2VLONG(x) VECSIZEIT(convert_ulong, VECSIZE)(x)
+#endif
 
 
 /*** Kernel Helpers ***/
@@ -168,25 +177,6 @@ VLONG mul_wide_u32 (const VINT a, const VINT b) {
   return upsample(mul_hi(a, b), a*b);
 }
 
-
-
-// Same function, for a constant NSTEP.
-#if D_NSTEP == 22
-#define SHIFTMOD_REDCX(NSTEP) \
-VLONG shiftmod_REDC##NSTEP (const VLONG a, const VLONG N, VLONG rax) { \
-  VLONG rcx; \
-  rax = rax << (64-NSTEP); \
-  rcx = a >> NSTEP; \
-  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0)); \
-  rax = mad_hi(rax, N, rcx); \
-  rcx = rax - N; \
-  rax = (rax>N)?rcx:rax; \
-  return rax; \
-}
-SHIFTMOD_REDCX(21)
-SHIFTMOD_REDCX(42)
-#endif
-
 #if D_NSTEP == 32
 // Same function, for a constant NSTEP of 32.
 VLONG shiftmod_REDC32 (VLONG rcx, const VLONG N, const VINT rax)
@@ -275,8 +265,14 @@ invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
 
 
 // *** KERNELS ***
+#if VECSIZE == 1
+#define VLOAD(X, Y) Y[X]
+#define VSTORE(X, Y, Z) Z[Y] = (X)
+#else
 #define VLOAD VECSIZEIT(vload,VECSIZE)
 #define VSTORE VECSIZEIT(vstore,VECSIZE)
+#endif
+
 // Set up to check N's by getting in position with division only.  Doesn't use the CPU for a powmod, but should only be used for small nmin.
 __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
                                  // Device constants
@@ -407,7 +403,31 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
         my_factor_found.X |= 1; \
     }
 #endif
-#if(VECSIZE == 2)
+#if(VECSIZE == 1)
+#define ALL_CTZLL \
+        if(v != 0) { \
+          v=31u - clz (v & -v); \
+      } else { \
+        v = (uint)(kpos>>32); \
+        v=63u - clz (v & -v); \
+      }
+#ifdef D_KMAX
+#define ALL_FLAG_TEST \
+    if ((((uint)(kpos >> 32))>>v) == 0) { \
+     if(((uint)(kpos >> v)) <= D_KMAX) { \
+      if((kpos >> v) >= D_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+        my_factor_found |= 1; \
+     } \
+    }
+#else
+#define ALL_FLAG_TEST \
+    if ((kpos >> v) <= d_kmax) { \
+      if((kpos >> v) >= THE_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+        my_factor_found |= 1; \
+    }
+#endif
+#define VEC_IF if(v == 0)
+#elif(VECSIZE == 2)
 #define ALL_CTZLL \
       VEC_CTZLL(v,x) \
       VEC_CTZLL(v,y)
@@ -450,7 +470,11 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define TWIN_CHOOSE_EVEN_K0 kpos = k0;
 #define TWIN_CHOOSE_EVEN
 #endif
-
+#if VECSIZE == 1
+#define VDOTX v
+#else
+#define VDOTX v.x
+#endif
 __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N, const uint shift
                                  // Device constants
 #ifndef D_KMIN
@@ -461,23 +485,23 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
 #endif
                                  ) {
   VINT v;
-  VLONG my_P;// = P[v.x];
-  VLONG Ps;// = Psarr[v.x];
+  VLONG my_P;// = P[VDOTX];
+  VLONG Ps;// = Psarr[VDOTX];
   uint n = N;
-  VLONG k0;// = K[v.x];
-  VINT my_factor_found;// = factor_found_arr[v.x];
+  VLONG k0;// = K[VDOTX];
+  VINT my_factor_found;// = factor_found_arr[VDOTX];
   VLONG kpos;
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
-  v.x = get_global_id(0);
-  Ps = VLOAD(v.x, Psarr);
-  k0 = VLOAD(v.x, K);
-  my_P = VLOAD(v.x, P);
+  VDOTX = get_global_id(0);
+  Ps = VLOAD(VDOTX, Psarr);
+  k0 = VLOAD(VDOTX, K);
+  my_P = VLOAD(VDOTX, P);
   if(n == D_NMIN) {
     my_factor_found = (VINT)VECTORIZE(0);
   } else {
-    my_factor_found = VLOAD(v.x, factor_found_arr);
+    my_factor_found = VLOAD(VDOTX, factor_found_arr);
     my_factor_found <<= shift;
   }
 #ifdef _DEVICEEMU
@@ -517,14 +541,14 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (VINT)k0);
 #endif
-  v.x = get_global_id(0);
+  VDOTX = get_global_id(0);
   if(n < D_NMAX) {
-    //K[v.x] = k0;
-    VSTORE(k0, v.x, K);
+    //K[VDOTX] = k0;
+    VSTORE(k0, VDOTX, K);
   } else {
     // Prepend a checksum of the K result to my_factor_found.
     my_factor_found |= V2VINT(k0)<<8;
   }
-  //factor_found_arr[v.x] = my_factor_found;
-  VSTORE(my_factor_found, v.x, factor_found_arr);
+  //factor_found_arr[VDOTX] = my_factor_found;
+  VSTORE(my_factor_found, VDOTX, factor_found_arr);
 }
