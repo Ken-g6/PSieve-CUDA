@@ -163,6 +163,13 @@ VLONG shiftmod_REDC (const VLONG a,
   return rax;
 }
 
+// Multiply two 32-bit integers to get a 64-bit result.
+VLONG mul_wide_u32 (const VINT a, const VINT b) {
+  return upsample(mul_hi(a, b), a*b);
+}
+
+
+
 // Same function, for a constant NSTEP.
 #if D_NSTEP == 22
 #define SHIFTMOD_REDCX(NSTEP) \
@@ -178,6 +185,53 @@ VLONG shiftmod_REDC##NSTEP (const VLONG a, const VLONG N, VLONG rax) { \
 }
 SHIFTMOD_REDCX(21)
 SHIFTMOD_REDCX(42)
+#endif
+
+#if D_NSTEP == 32
+// Same function, for a constant NSTEP of 32.
+VLONG shiftmod_REDC32 (VLONG rcx, const VLONG N, const VINT rax)
+{
+  //unsigned int temp;
+  //uint64_t rcx;
+
+  rcx >>= 32;
+  //temp = ((unsigned int)(N>>32));
+  // This isn't in an asm, but should be compiled as mad.hi.u32. Four cycles.
+  // We know this can fit an unsigned int because (N-1)*(N-1) = N^2-2N-1, so adding the equivalent of 1N is OK.
+  rcx += V2VLONG(mad_hi(rax, V2VINT(N), (rax!=(VINT)VECTORIZE(0))?((VINT)VECTORIZE(1)):((VINT)VECTORIZE(0))));
+  // A wide multiply should take ~8 cycles here, and the add can't be combined.  But that's better than 16.
+  rcx += mul_wide_u32(rax, V2VINT(N>>32));
+  // Two cycles for this one add!
+  //rcx = ((((uint64_t)__umulhi((unsigned int)rax,(unsigned int)(N>>32))) << 32) | (((unsigned int)rax)*((unsigned int)(N>>32)))) + rcx;
+  //rax = ((uint64_t)((unsigned int)rax))*((uint64_t)((unsigned int)(N>>32))) + temp;
+
+  // And the rest is normal, but squashed.
+  rcx = (rcx>N)?(rcx-N):rcx;
+}
+#endif
+#if D_NSTEP < 32
+// Same function for nstep < 32. (SMall.)
+// Third argument must be passed in as only the low register, as we're effectively left-shifting 32 plus a small number.
+VLONG shiftmod_REDCsm (VLONG rcx, const VLONG N, VINT rax)
+{
+  //unsigned int temp;
+  //uint64_t rcx;
+
+  rax <<= (D_MONT_NSTEP-32);
+  rcx >>= D_NSTEP;
+  //temp = ((unsigned int)(N>>32));
+  // This isn't in an asm, but should be compiled as mad.hi.u32. Four cycles.
+  // We know this can fit an unsigned int because (N-1)*(N-1) = N^2-2N-1, so adding the equivalent of 1N is OK.
+  rcx += V2VLONG(mad_hi(rax, V2VINT(N), (rax!=(VINT)VECTORIZE(0))?((VINT)VECTORIZE(1)):((VINT)VECTORIZE(0))));
+  // A wide multiply should take ~8 cycles here, and the add can't be combined.  But that's better than 16.
+  rcx += mul_wide_u32(rax, V2VINT(N>>32));
+  // Two cycles for this one add!
+  //rcx = ((((uint64_t)__umulhi((unsigned int)rax,(unsigned int)(N>>32))) << 32) | (((unsigned int)rax)*((unsigned int)(N>>32)))) + rcx;
+  //rax = ((uint64_t)((unsigned int)rax))*((uint64_t)((unsigned int)(N>>32))) + temp;
+
+  // And the rest is normal, but squashed.
+  rcx = (rcx>N)?(rcx-N):rcx;
+}
 #endif
 
 // Same function, for a custom NSTEP.  step should be no bigger than NSTEP.
@@ -411,9 +465,6 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   VLONG k0;// = K[v.x];
   VINT my_factor_found;// = factor_found_arr[v.x];
   VLONG kpos;
-#if D_NSTEP == 32 || D_NSTEP == 22
-  VLONG kPs;
-#endif
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
@@ -431,11 +482,6 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
   //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
-#if D_NSTEP == 32 || D_NSTEP == 22
-    // Get next K from the Montgomery form.
-    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = k0 * Ps;
-#endif
     TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
     ALL_IF_CTZLL
@@ -443,45 +489,27 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     // Just flag this if kpos <= d_kmax.
     ALL_FLAG_TEST
 
-#if D_NSTEP == 32 || D_NSTEP == 22
 #if D_NSTEP == 32
     n += 32;
-    kpos = shiftmod_REDC(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
+    k0 = shiftmod_REDC32(k0, my_P, V2VINT(k0)*V2VINT(Ps));
+    TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
     ALL_IF_CTZLL
 
     // Just flag this if kpos <= d_kmax.
     ALL_FLAG_TEST
     n += 32;
-#else // D_NSTEP == 22
-    kpos = shiftmod_REDC21(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
-    n += 21;
-    //i = __ffsll(kpos)-1;
-    ALL_IF_CTZLL
-
-    // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
-
-    kpos = shiftmod_REDC42(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
-    n += 21;
-    //i = __ffsll(kpos)-1;
-    ALL_IF_CTZLL
-
-    // Just flag this if kpos <= d_kmax.
-    ALL_FLAG_TEST
-    n += 22;
-#endif
-    // Proceed 64 N's to the next starting point.
-    k0 = onemod_REDC(my_P, kPs);
+    k0 = shiftmod_REDC32(k0, my_P, V2VINT(k0)*V2VINT(Ps));
 #else
+    n += D_NSTEP;
+#if D_NSTEP < 32
+    k0 = shiftmod_REDCsm(k0, my_P, V2VINT(k0)*V2VINT(Ps));
+#else // D_NSTEP > 32
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     kpos = k0 * Ps;
-    n += D_NSTEP;
     k0 = shiftmod_REDC(k0, my_P, kpos);
+#endif
 #endif
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
