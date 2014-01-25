@@ -14,9 +14,6 @@
 		/>
 	</Platforms>
 	<ToolFiles>
-		<ToolFile
-			RelativePath="..\..\..\..\All Users\Application Data\NVIDIA Corporation\NVIDIA GPU Computing SDK\C\common\Cuda.Rules"
-		/>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
@@ -31,12 +28,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
-				Emulation="true"
-				PtxAsOptionV="false"
-				Defines="NDEBUG;TRACE"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -114,11 +105,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-				PtxAsOptionV="true"
-				Defines="NDEBUG"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -131,8 +117,9 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT"
-				RuntimeLibrary="2"
+				AdditionalIncludeDirectories="$(ATISTREAMSDKROOT)/include"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_OPENCL"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -152,7 +139,7 @@
 				AdditionalDependencies="OpenCL.lib"
 				OutputFile="$(OutDir)\ppsieve-cl-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
+				AdditionalLibraryDirectories="../../common/lib;$(ATISTREAMSDKROOT)/lib/x86"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
@@ -193,11 +180,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
-				Emulation="true"
-				Defines="NDEBUG"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -272,11 +254,6 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="CUDA Build Rule"
-				Emulation="true"
-				Defines="NDEBUG"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -354,11 +331,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-				Include="&quot;..\boinc\lib&quot;"
-				Defines="NDEBUG;USE_BOINC"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -371,9 +343,9 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS"
-				RuntimeLibrary="2"
+				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;;$(ATISTREAMSDKROOT)/include"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;USE_OPENCL;_CRT_SECURE_NO_WARNINGS"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -393,8 +365,8 @@
 				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
 				OutputFile="$(OutDir)\$(ProjectName)-boinc-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
-				GenerateDebugInformation="true"
+				AdditionalLibraryDirectories="..\boinc\win_build\Build\Win32\Release;$(ATISTREAMSDKROOT)/lib/x86"
+				GenerateDebugInformation="false"
 				SubSystem="1"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
@@ -437,11 +409,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-				PtxAsOptionV="true"
-				Defines="NDEBUG;SEARCH_TWIN"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -454,8 +421,9 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;SEARCH_TWIN"
-				RuntimeLibrary="2"
+				AdditionalIncludeDirectories="$(ATISTREAMSDKROOT)/include"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;SEARCH_TWIN;USE_OPENCL"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -472,11 +440,11 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib cuda.lib"
-				OutputFile="$(OutDir)\tpsieve-cuda-x86-windows.exe"
+				AdditionalDependencies="OpenCL.lib"
+				OutputFile="$(OutDir)\tpsieve-cl-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);../../common/lib"
-				GenerateDebugInformation="true"
+				AdditionalLibraryDirectories="../../common/lib;$(ATISTREAMSDKROOT)/lib/x86"
+				GenerateDebugInformation="false"
 				SubSystem="1"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
@@ -519,11 +487,6 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
-				Name="CUDA Build Rule"
-				Include="&quot;..\boinc\lib&quot;"
-				Defines="NDEBUG;USE_BOINC;SEARCH_TWIN"
-			/>
-			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -536,9 +499,9 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;"
-				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;_CRT_SECURE_NO_WARNINGS;SEARCH_TWIN"
-				RuntimeLibrary="2"
+				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;;$(ATISTREAMSDKROOT)/include"
+				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;USE_OPENCL;_CRT_SECURE_NO_WARNINGS;SEARCH_TWIN"
+				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				UsePrecompiledHeader="0"
 				WarningLevel="3"
@@ -558,7 +521,7 @@
 				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
 				OutputFile="$(OutDir)\tpsieve-cuda-boinc-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="$(CUDA_LIB_PATH);..\boinc\win_build\Build\Win32\Release"
+				AdditionalLibraryDirectories="..\boinc\win_build\Build\Win32\Release;$(ATISTREAMSDKROOT)/lib/x86"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"

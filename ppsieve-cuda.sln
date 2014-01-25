@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 10.00
 # Visual C++ Express 2008
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ppsieve-cuda", "pps\ppsieve-cuda.vcproj", "{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ppsieve-cl", "pps\ppsieve-cuda.vcproj", "{5970FA71-0711-47BE-A72A-45C61FB4FB12}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
