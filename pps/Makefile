@@ -51,12 +51,12 @@ TPS_BOINC_BINS = $(TPS_APPNAME)-boinc-x86-$(PLATFORM) $(TPS_APPNAME)-boinc-x86_6
 
 ifeq ($(PLATFORM),linux)
   CC = gcc
-  CC32 = $(CC) -c -m32 -march=i586 -mtune=core2
+  CC32 = $(CC) -c -m32 -march=pentium-m -mtune=core2
   CC64 = $(CC) -c -m64 -march=k8 -mno-3dnow -mtune=core2
   NVCC = nvcc
   CL_DEFINE = -DUSE_OPENCL
   CL_INCLUDE = -I $(ATISTREAMSDKROOT)/include
-  CL32 = $(CXX) -c -m32 -march=i586 -mtune=core2 $(CL_INCLUDE)
+  CL32 = $(CXX) -c -m32 -march=pentium-m -mtune=core2 $(CL_INCLUDE)
   CL64 = $(CXX) -c -m64 -march=k8 -mno-3dnow -mtune=core2 $(CL_INCLUDE)
 else ifeq ($(PLATFORM),mac)
   TARGET_OS = MACOSX_DEPLOYMENT_TARGET=10.6
