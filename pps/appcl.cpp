@@ -419,6 +419,57 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       bmprefix(), deviceno, vendor, name);
   // Make it 8 wavefronts per SIMD by default.
   if(*cthread_count == 0) *cthread_count = 8;
+  // If this is a GCN device, multiply cthread_count by 8 and divide vecsize by 2.
+  // I don't know if all these names are correct.  Many come from rumor sites.
+  int namelen = strlen(name);
+  if(
+      (namelen == 4 && (
+          strcmp(name, "Maui") == 0 ||
+          strcmp(name, "Xtr4") == 0 ||
+          strcmp(name, "Fiji") == 0)) ||
+      (namelen == 5 && (
+          strcmp(name, "Aruba") == 0 ||
+          strcmp(name, "Malta") == 0 ||
+          strcmp(name, "Oland") == 0 ||
+          strcmp(name, "Topaz") == 0 ||
+          strcmp(name, "Xtra5") == 0 ||
+          strcmp(name, "Tonga") == 0)) ||
+      (namelen == 6 && (
+          strcmp(name, "Hawaii") == 0 ||
+          strcmp(name, "Tahiti") == 0 ||
+          strcmp(name, "Hainan") == 0 ||
+          strcmp(name, "Xtra6 ") == 0 ||
+          strcmp(name, "Spooky") == 0)) ||
+      (namelen == 7 && (
+          strcmp(name, "Bonaire") == 0 ||
+          strcmp(name, "Curacao") == 0 ||
+          strcmp(name, "Curaçao") == 0 ||
+          strcmp(name, "Mullins") == 0 ||
+          strcmp(name, "Iceland") == 0 ||
+          strcmp(name, "Bermuda") == 0 ||
+          strcmp(name, "Xtra7  ") == 0 ||
+          strcmp(name, "Spectre") == 0)) ||
+      (namelen == 8 && (
+          strcmp(name, "Pitcairn") == 0 ||
+          strcmp(name, "Ice Land") == 0 ||
+          strcmp(name, "Amethyst") == 0 ||
+          strcmp(name, "Treasure") == 0 ||
+          strcmp(name, "Xtra8   ") == 0 ||
+          strcmp(name, "Vesuvius") == 0)) ||
+      (namelen == 10 && strcmp(name, "Cape Verde") == 0) ||
+      (namelen >= 14 &&
+       name[0] == 'G' &&
+       name[1] == 'e' &&
+       name[2] == 'F' &&
+       name[3] == 'o' &&
+       name[4] == 'r' &&
+       name[5] == 'c' &&
+       name[6] == 'e')) {
+    bmsg("GCN device detected; use -m1 --vecsize=4 to undo effect\n");
+    *cthread_count *= 8;
+    vecsize /= 2;
+    if(vecsize == 0) vecsize = 1;
+  }
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
   // Double this if using ulong2.
   *cthread_count *= vecsize;
