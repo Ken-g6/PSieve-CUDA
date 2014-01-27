@@ -864,23 +864,6 @@ unsigned int app_thread_init(int th)
 }
 
 /*  Multiplies for REDC code  */
-#if defined(GCC) && !defined(__x86_64__) && defined(__i386__)
-static uint64_t __umul64(const unsigned int a, const unsigned int b)
-{
-  unsigned int t1, t2;
-  __asm__
-  ( "mull %3\n\t"
-    : "=a" (t1), "=d" (t2)
-    : "0" (a), "rm" (b)
-    : "cc");
-  return (((uint64_t)t2)<<32)+t1;
-}
-#else
-static uint64_t __umul64(const unsigned int a, const unsigned int b)
-{
-  return (uint64_t)a * (uint64_t)b;
-}
-#endif
 
 #if defined(GCC) && defined(__x86_64__)
 static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
@@ -894,37 +877,6 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
   return t2;
 }
 #else
-#ifdef __SSE2__
-static uint64_t __umul64hi(const uint64_t a, const uint64_t b) {
-  uint64_t abarr[2];
-  abarr[0] = a;
-  abarr[1] = b;
-  {
-    __m128i ma = _mm_load_si128((__m128i*)(&abarr[0]));
-    __m128i mb = _mm_shuffle_epi32 (ma, 0xFA); // b_hi, b_hi, b_lo, b_lo
-    __m128i mlo = _mm_shuffle_epi32 (ma, 0xCD); // 0, a_lo, 0, a_hi
-    __m128i mhi;
-    ma = _mm_shuffle_epi32 (ma, 0xDC); // 0, a_hi, 0, a_lo
-    mlo = _mm_mul_epu32(mlo, mb);  // mlo = a_lo*b_hi, a_hi*b_lo (The cross multiply)
-    mb = _mm_mul_epu32(mb, ma);  // mb = a_hi*b_hi, a_lo*b_lo (The straight multiply)
-    mhi = _mm_srli_epi64(mlo, 32);  // mhi = high bits of the cross multiply.  Must be a shift to make zeroes.
-    mlo = _mm_slli_epi64(mlo, 32);  // mlo = low bits of the cross multiply (<<32).  Must be a shift to make zeroes.
-    mlo = _mm_shuffle_epi32(mlo, 0xB1); // mlo >>= 32, but with a different port on the CPU.
-    ma = _mm_srli_epi64(mb, 32); // carry = __umulhi(a_lo, b_lo) - last 64 bits are all we care about.
-    mb = _mm_shuffle_epi32(mb, 0xEE); // mb >>= 64, when last 64 bits are all we care about, and we want to use a different port.
-    ma = _mm_add_epi64(ma, mlo); // carry += mlo2
-    mb = _mm_add_epi64(mb, mhi); // mb += mhi2
-    mlo = _mm_shuffle_epi32(mlo, 0xEE); // mlo >>= 64, when last 64 bits are all we care about.
-    mhi = _mm_shuffle_epi32(mhi, 0xEE); // mhi >>= 64, when last 64 bits are all we care about.
-    ma = _mm_add_epi64(ma, mlo); // carry += mlo1
-    mb = _mm_add_epi64(mb, mhi); // mb += mhi1
-    ma = _mm_srli_epi64(ma, 32); // carry >>= 32
-    mb = _mm_add_epi64(mb, ma); // mb += carry
-    _mm_store_si128((__m128i*)(&abarr[0]), mb);
-  }
-  return abarr[0];
-}
-#else
 #if defined(GCC) && !defined(__x86_64__) && defined(__i386__)
 static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
@@ -936,12 +888,26 @@ static unsigned int __umulhi(const unsigned int a, const unsigned int b)
     : "cc");
   return t2;
 }
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  unsigned int t1, t2;
+  __asm__
+  ( "mull %3\n\t"
+    : "=a" (t1), "=d" (t2)
+    : "0" (a), "rm" (b)
+    : "cc");
+  return (((uint64_t)t2)<<32)+t1;
+}
 #else
 static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   uint64_t c = (uint64_t)a * (uint64_t)b;
 
   return (unsigned int)(c >> 32);
+}
+static uint64_t __umul64(const unsigned int a, const unsigned int b)
+{
+  return (uint64_t)a * (uint64_t)b;
 }
 #endif
 
@@ -961,7 +927,6 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
   return __umul64(a_hi, b_hi) + (m1 >> 32) + (m2 >> 32) + carry;
   //return __umul64(a_hi, b_hi) + (m1 >> 32);
 }
-#endif
 #endif
 
 /*  BEGIN REDC CODE  */
