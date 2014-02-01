@@ -499,7 +499,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="&quot;..\boinc\lib&quot;;&quot;..\boinc\api&quot;;$(ATISTREAMSDKROOT)/include"
+				AdditionalIncludeDirectories="&quot;..\..\boinc\lib&quot;;&quot;..\..\boinc\api&quot;;$(ATISTREAMSDKROOT)/include"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;USE_OPENCL;_CRT_SECURE_NO_WARNINGS;SEARCH_TWIN"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"

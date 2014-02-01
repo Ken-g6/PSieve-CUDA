@@ -456,6 +456,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
           strcmp(name, "Treasure") == 0 ||
           strcmp(name, "Xtra8   ") == 0 ||
           strcmp(name, "Vesuvius") == 0)) ||
+      (namelen == 9 && strcmp(name, "Capeverde") == 0) ||
       (namelen == 10 && strcmp(name, "Cape Verde") == 0) ||
       (namelen >= 14 &&
        name[0] == 'G' &&
