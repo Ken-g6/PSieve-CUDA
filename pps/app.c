@@ -66,6 +66,7 @@
 // MPOS = result (32-bit)
 // KPOS = input (64-bit; evaluated twice!)
 // ID = a unique ID string.
+/*
 #if !defined(__x86_64__) && defined(__i386__) && defined(__GNUC__)
 #define BSFQ(MPOS,KPOS,ID)          asm volatile \
             ( 		"bsfl	%[k0l], %[pos]	\n" \
@@ -77,10 +78,10 @@
                 : [k0l] "rm" ((unsigned int)(KPOS)), \
                 [k0h] "rm" ((unsigned int)((KPOS) >> 32)) \
                 : "cc" )
-#else
+#else*/
 // If anyone wants to compile on some non-x86 platform somehow...
 #define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS)
-#endif
+//#endif
 
 #define FORMAT_NEWPGEN 1
 #define FORMAT_ABCD 2
@@ -1103,7 +1104,7 @@ int test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned in
 #endif
     //i = __ffsll(kpos)-1;
     //i = __builtin_ctzll(kpos);
-    BSFQ(i, kpos, 1);
+    BSFQ(i, kpos, 0);
 
 #ifdef SEARCH_TWIN
     if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep)
