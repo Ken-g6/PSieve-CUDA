@@ -1104,7 +1104,7 @@ int test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned in
 #endif
     //i = __ffsll(kpos)-1;
     //i = __builtin_ctzll(kpos);
-    BSFQ(i, kpos, 1);
+    BSFQ(i, kpos, 0);
 
 #ifdef SEARCH_TWIN
     if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep)
