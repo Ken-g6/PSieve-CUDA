@@ -10,9 +10,9 @@ COMMON_OBJS = ../clock.o factor_proth.o
 # Non-BOINC 32-bit objects.
 OBJS = ../main.o ../putil.o ../sieve.o $(COMMON_OBJS)
 CUDA_OBJS = $(OBJS) app.o cuda_sleep_memcpy.o appcu.o
-CL_OBJS = $(OBJS) cl_app.o appcl.o
+CL_OBJS = appcl.h $(OBJS) cl_app.o appcl.o
 TPSOBJS = ../tpmain.o ../putil.o ../sieve.o tpapp.o tpappcu.o $(COMMON_OBJS)
-CL_TPSOBJS = ../tpmain.o ../putil.o ../sieve.o cl_tpapp.o tpappcl.o $(COMMON_OBJS)
+CL_TPSOBJS = appcl.h ../tpmain.o ../putil.o ../sieve.o cl_tpapp.o tpappcl.o $(COMMON_OBJS)
 
 # BOINC 32-bit objects.
 BOINC_OBJS = ../do_boinc_init.o ../main_boinc.o ../putil_boinc.o ../sieve_boinc.o $(COMMON_OBJS)
@@ -48,6 +48,7 @@ BINS = $(NON_BOINC_BINS) $(BOINC_BINS)
 CL_BINS = $(CL_NON_BOINC_BINS) $(CL_BOINC_BINS)
 TPS_BINS = $(TPS_APPNAME)-x86-$(PLATFORM) $(TPS_APPNAME)-x86_64-$(PLATFORM) 
 TPS_BOINC_BINS = $(TPS_APPNAME)-boinc-x86-$(PLATFORM) $(TPS_APPNAME)-boinc-x86_64-$(PLATFORM) 
+CL_TPS_BOINC_BINS = $(CL_TPS_APPNAME)-boinc-x86-$(PLATFORM) $(CL_TPS_APPNAME)-boinc-x86_64-$(PLATFORM) 
 
 ifeq ($(PLATFORM),linux)
   CC = gcc
@@ -96,7 +97,7 @@ ifeq ($(PLATFORM),mac)
 endif
 
 # Uncomment this line if BOINC is in a user-specified directory.
-#BOINC_DIR = /downloads/distributed/boinc610/server_stable
+BOINC_DIR = /multimedia/boinc610
 ifdef BOINC_DIR
 BOINC_API_DIR = $(BOINC_DIR)/api
 BOINC_LIB_DIR = $(BOINC_DIR)/lib
@@ -143,13 +144,13 @@ changes:
 	git log | grep "^\(    \|Date:\)" > CHANGES.txt
 
 # Binaries:
-tps: $(TPS_BINS) $(TPS_BOINC_BINS)
+tps: $(CL_TPS_BINS) $(CL_TPS_BOINC_BINS)
 	
 # $(CL_TPS_BINS) $(CL_TPS_BOINC_BINS)
 
-non-boinc: $(NON_BOINC_BINS) $(TPS_BINS)
+non-boinc: $(CL_NON_BOINC_BINS) $(CL_TPS_BINS)
 
-boinc: $(BOINC_BINS) $(TPS_BOINC_BINS)
+boinc: $(CL_TPS_BOINC_BINS)
 
 clean:
 	-rm *.o ../*.o appcl.h $(BINS) $(CL_BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
