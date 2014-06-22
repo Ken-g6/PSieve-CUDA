@@ -418,24 +418,29 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #endif
 #if(VECSIZE == 1)
 #define ALL_CTZLL \
-        if(v != 0) { \
-          v=31u - clz (v & -v); \
+      if(v != 0) { \
+        v=31u - clz (v & -v); \
       } else { \
         v = (uint)(kpos>>32); \
         v=63u - clz (v & -v); \
       }
 #ifdef D_KMAX
 #define ALL_FLAG_TEST \
-    if ((((uint)(kpos >> 32))>>v) == 0) { \
-     if(((uint)(kpos >> v)) <= D_KMAX) { \
-      if((kpos >> v) >= D_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+    if ((kpos >> v) <= D_KMAX) { \
+      if((kpos >> v) >= D_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
         my_factor_found |= 1; \
-     } \
     }
+#define ALL_FAST_FLAG_TEST \
+  if ((((uint)(kpos >> 32))>>v) == 0) { \
+    if(((uint)(kpos >> v)) <= D_KMAX) { \
+      if((kpos >> v) >= D_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
+        my_factor_found |= 1; \
+    } \
+  }
 #else
 #define ALL_FLAG_TEST \
     if ((kpos >> v) <= d_kmax) { \
-      if((kpos >> v) >= THE_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+      if((kpos >> v) >= THE_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
         my_factor_found |= 1; \
     }
 #endif
@@ -486,12 +491,15 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #ifdef SEARCH_TWIN
 // Select the even one here, so as to use the zero count and shift.
 // The other side (whether positive or negative) is odd then, with no zeroes on the right.
+#if(VECSIZE == 1)
+#define TWIN_CHOOSE_EVEN_K0 kpos = (((unsigned int)k0) & 1)?(my_P - k0):k0;
+#else
 #define TWIN_CHOOSE_EVEN_K0 kpos = (((k0) & (VLONG)VECTORIZE(1)) == (VLONG)VECTORIZE(1))?(my_P - k0):k0;
-//#define TWIN_CHOOSE_EVEN if(((unsigned int)kpos) & 1) kpos = my_P - kpos;
-#define TWIN_CHOOSE_EVEN kpos = (((kpos) & (VLONG)VECTORIZE(1)) == (VLONG)VECTORIZE(1))?(my_P - kpos):kpos;
+#endif
+//#define TWIN_CHOOSE_EVEN kpos = (((kpos) & (VLONG)VECTORIZE(1)) == (VLONG)VECTORIZE(1))?(my_P - kpos):kpos;
 #else
 #define TWIN_CHOOSE_EVEN_K0 kpos = k0;
-#define TWIN_CHOOSE_EVEN
+//#define TWIN_CHOOSE_EVEN
 #endif
 
 __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N, const uint shift

@@ -502,12 +502,6 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   if(ld_nstep >= 32 /*&& ld_nstep < 48*/ && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
-    /*
-  }
-  // Use the 22-step algorithm where useful.
-  else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
-    if(ld_nstep != 22) printf("nstep changed to 22\n");
-    ld_nstep = 22; */
   } else {
 #ifdef SEARCH_TWIN
     printf("Changed nstep to %u\n", ld_nstep);
@@ -518,24 +512,14 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
 
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
-  if(ld_nstep == 32) ld_kernel_nstep /= 2;
-  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (*cthread_count/compute_units);
   // But shrink it to give at least four big N sections.
-  if(ld_nstep == 32) i = 2;
-  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
-  else i = 1;
-  while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
+  while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
   
   // Finally, make sure it's a multiple of ld_nstep!!!
-  /* if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
-  else */ {
-    ld_kernel_nstep *= ld_nstep;
-    // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
-    if(ld_nstep == 32) ld_kernel_nstep *= 2;
-  }
+  ld_kernel_nstep *= ld_nstep;
   // Set the constants.
   //CL_MEMCPY_TO_SYMBOL(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
 
@@ -762,7 +746,6 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
     n_subsection_start[0] = nmax;
     j = ld_nstep;
-    if(ld_nstep == 32) j = 64; //  || ld_nstep == 22
     n_subsection_start[0] -= nmin;
     n_subsection_start[0] /= j;
     n_subsection_start[0] *= j;
