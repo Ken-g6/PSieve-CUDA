@@ -419,6 +419,58 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
       bmprefix(), deviceno, vendor, name);
   // Make it 8 wavefronts per SIMD by default.
   if(*cthread_count == 0) *cthread_count = 8;
+  // If this is a GCN device, multiply cthread_count by 8 and divide vecsize by 2.
+  // I don't know if all these names are correct.  Many come from rumor sites.
+  int namelen = strlen(name);
+  if(
+      (namelen == 4 && (
+          strcmp(name, "Maui") == 0 ||
+          strcmp(name, "Xtr4") == 0 ||
+          strcmp(name, "Fiji") == 0)) ||
+      (namelen == 5 && (
+          strcmp(name, "Aruba") == 0 ||
+          strcmp(name, "Malta") == 0 ||
+          strcmp(name, "Oland") == 0 ||
+          strcmp(name, "Topaz") == 0 ||
+          strcmp(name, "Xtra5") == 0 ||
+          strcmp(name, "Tonga") == 0)) ||
+      (namelen == 6 && (
+          strcmp(name, "Hawaii") == 0 ||
+          strcmp(name, "Tahiti") == 0 ||
+          strcmp(name, "Hainan") == 0 ||
+          strcmp(name, "Xtra6 ") == 0 ||
+          strcmp(name, "Spooky") == 0)) ||
+      (namelen == 7 && (
+          strcmp(name, "Bonaire") == 0 ||
+          strcmp(name, "Curacao") == 0 ||
+          strcmp(name, "Curaçao") == 0 ||
+          strcmp(name, "Mullins") == 0 ||
+          strcmp(name, "Iceland") == 0 ||
+          strcmp(name, "Bermuda") == 0 ||
+          strcmp(name, "Xtra7  ") == 0 ||
+          strcmp(name, "Spectre") == 0)) ||
+      (namelen == 8 && (
+          strcmp(name, "Pitcairn") == 0 ||
+          strcmp(name, "Ice Land") == 0 ||
+          strcmp(name, "Amethyst") == 0 ||
+          strcmp(name, "Treasure") == 0 ||
+          strcmp(name, "Xtra8   ") == 0 ||
+          strcmp(name, "Vesuvius") == 0)) ||
+      (namelen == 9 && strcmp(name, "Capeverde") == 0) ||
+      (namelen == 10 && strcmp(name, "Cape Verde") == 0) ||
+      (namelen >= 14 &&
+       name[0] == 'G' &&
+       name[1] == 'e' &&
+       name[2] == 'F' &&
+       name[3] == 'o' &&
+       name[4] == 'r' &&
+       name[5] == 'c' &&
+       name[6] == 'e')) {
+    bmsg("GCN device detected; use -m1 --vecsize=4 to undo effect\n");
+    *cthread_count *= 8;
+    vecsize /= 2;
+    if(vecsize == 0) vecsize = 1;
+  }
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
   // Double this if using ulong2.
   *cthread_count *= vecsize;
@@ -447,14 +499,15 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   ld_nstep--;
 #endif
   // Use the 32-step algorithm where useful.
-  if(ld_nstep >= 32 && ld_nstep < 48 && (((uint64_t)1) << 32) <= pmin) {
+  if(ld_nstep >= 32 /*&& ld_nstep < 48*/ && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
+    /*
   }
   // Use the 22-step algorithm where useful.
   else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
     if(ld_nstep != 22) printf("nstep changed to 22\n");
-    ld_nstep = 22;
+    ld_nstep = 22; */
   } else {
 #ifdef SEARCH_TWIN
     printf("Changed nstep to %u\n", ld_nstep);
@@ -466,19 +519,19 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
   if(ld_nstep == 32) ld_kernel_nstep /= 2;
-  else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
+  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (*cthread_count/compute_units);
   // But shrink it to give at least four big N sections.
-  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
-  else if(ld_nstep == 32) i = 2;
+  if(ld_nstep == 32) i = 2;
+  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
   else i = 1;
   while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
   
   // Finally, make sure it's a multiple of ld_nstep!!!
-  if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
-  else {
+  /* if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
+  else */ {
     ld_kernel_nstep *= ld_nstep;
     // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
     if(ld_nstep == 32) ld_kernel_nstep *= 2;
@@ -709,7 +762,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
     n_subsection_start[0] = nmax;
     j = ld_nstep;
-    if(ld_nstep == 32 || ld_nstep == 22) j = 64;
+    if(ld_nstep == 32) j = 64; //  || ld_nstep == 22
     n_subsection_start[0] -= nmin;
     n_subsection_start[0] /= j;
     n_subsection_start[0] *= j;

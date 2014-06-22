@@ -66,6 +66,7 @@
 // MPOS = result (32-bit)
 // KPOS = input (64-bit; evaluated twice!)
 // ID = a unique ID string.
+/*
 #if !defined(__x86_64__) && defined(__i386__) && defined(__GNUC__)
 #define BSFQ(MPOS,KPOS,ID)          asm volatile \
             ( 		"bsfl	%[k0l], %[pos]	\n" \
@@ -77,10 +78,10 @@
                 : [k0l] "rm" ((unsigned int)(KPOS)), \
                 [k0h] "rm" ((unsigned int)((KPOS) >> 32)) \
                 : "cc" )
-#else
+#else*/
 // If anyone wants to compile on some non-x86 platform somehow...
 #define BSFQ(MPOS,KPOS,ID) MPOS = __builtin_ctzll(KPOS)
-#endif
+//#endif
 
 #define FORMAT_NEWPGEN 1
 #define FORMAT_ABCD 2
@@ -619,8 +620,8 @@ int app_parse_option(int opt, char *arg, const char *source)
 
 #ifdef VECSIZE
     case 'v':
-      status = parse_uint(&vecsize,arg,2,4);
-      if(vecsize < 2 || vecsize > 4) vecsize = VECSIZE;
+      status = parse_uint(&vecsize,arg,1,4);
+      if(vecsize < 1 || vecsize > 4) vecsize = VECSIZE;
       break;
 #endif
     //case 'q':
@@ -649,7 +650,7 @@ void app_help(void)
   printf("-R --riesel        Sieve for primes k*2^n-1 instead of +1.\n");
 #endif
 #ifdef VECSIZE
-  printf("-v --vecsize=N     Use the given vector size (2 or 4).\n");
+  printf("-v --vecsize=N     Use the given vector size (1, 2, or 4).\n");
 #endif
   printf("-d --device=N      Use GPU N instead of 0-threads\n");
 }
@@ -877,7 +878,7 @@ static uint64_t __umul64hi(const uint64_t a, const uint64_t b)
   return t2;
 }
 #else
-#if defined(GCC) && !defined(__x86_64__)
+#if defined(GCC) && !defined(__x86_64__) && defined(__i386__)
 static unsigned int __umulhi(const unsigned int a, const unsigned int b)
 {
   unsigned int t1, t2;

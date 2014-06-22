@@ -25,7 +25,16 @@
 #define D_KMAX 9999u
 #define VECSIZE 2
 */
-
+#if VECSIZE == 1
+#define VLONG ulong
+#define VSIGNED_LONG long
+#define VINT uint
+#define VECTORIZE(x) (x)
+#define V2VINT(x) ((uint)(x))
+#define V2VLONG(x) ((ulong)(x))
+#define VDOTX v
+#else
+#define VDOTX v.x
 #define VECSIZEIT2(x,y) x##y
 #define VECSIZEIT(x,y) VECSIZEIT2(x,y)
 #define VLONG VECSIZEIT(ulong, VECSIZE)
@@ -40,6 +49,7 @@
 #endif
 #define V2VINT(x) VECSIZEIT(convert_uint, VECSIZE)(x)
 #define V2VLONG(x) VECSIZEIT(convert_ulong, VECSIZE)(x)
+#endif
 
 
 /*** Kernel Helpers ***/
@@ -164,20 +174,58 @@ VLONG shiftmod_REDC (const VLONG a,
 }
 
 // Same function, for a constant NSTEP.
-#if D_NSTEP == 22
-#define SHIFTMOD_REDCX(NSTEP) \
-VLONG shiftmod_REDC##NSTEP (const VLONG a, const VLONG N, VLONG rax) { \
-  VLONG rcx; \
-  rax = rax << (64-NSTEP); \
-  rcx = a >> NSTEP; \
-  rcx += (rax!=(VLONG)VECTORIZE(0))?((VLONG)VECTORIZE(1)):((VLONG)VECTORIZE(0)); \
-  rax = mad_hi(rax, N, rcx); \
-  rcx = rax - N; \
-  rax = (rax>N)?rcx:rax; \
-  return rax; \
+// Multiply two 32-bit integers to get a 64-bit result.
+VLONG mul_wide_u32 (const VINT a, const VINT b) {
+  return upsample(mul_hi(a, b), a*b);
 }
-SHIFTMOD_REDCX(21)
-SHIFTMOD_REDCX(42)
+
+#if D_NSTEP == 32
+// Same function, for a constant NSTEP of 32.
+VLONG shiftmod_REDC32 (VLONG rcx, const VLONG N, const VINT rax)
+{
+  //unsigned int temp;
+  //uint64_t rcx;
+
+  rcx >>= 32;
+  //temp = ((unsigned int)(N>>32));
+  // This isn't in an asm, but should be compiled as mad.hi.u32. Four cycles.
+  // We know this can fit an unsigned int because (N-1)*(N-1) = N^2-2N-1, so adding the equivalent of 1N is OK.
+  rcx += V2VLONG(mad_hi(rax, V2VINT(N), (rax!=(VINT)VECTORIZE(0))?((VINT)VECTORIZE(1)):((VINT)VECTORIZE(0))));
+  // A wide multiply should take ~8 cycles here, and the add can't be combined.  But that's better than 16.
+  rcx += mul_wide_u32(rax, V2VINT(N>>32));
+  // Two cycles for this one add!
+  //rcx = ((((uint64_t)__umulhi((unsigned int)rax,(unsigned int)(N>>32))) << 32) | (((unsigned int)rax)*((unsigned int)(N>>32)))) + rcx;
+  //rax = ((uint64_t)((unsigned int)rax))*((uint64_t)((unsigned int)(N>>32))) + temp;
+
+  // And the rest is normal, but squashed.
+  rcx = (rcx>N)?(rcx-N):rcx;
+  return rcx;
+}
+#endif
+#if D_NSTEP < 32
+// Same function for nstep < 32. (SMall.)
+// Third argument must be passed in as only the low register, as we're effectively left-shifting 32 plus a small number.
+VLONG shiftmod_REDCsm (VLONG rcx, const VLONG N, VINT rax)
+{
+  //unsigned int temp;
+  //uint64_t rcx;
+
+  rax <<= (D_MONT_NSTEP-32);
+  rcx >>= D_NSTEP;
+  //temp = ((unsigned int)(N>>32));
+  // This isn't in an asm, but should be compiled as mad.hi.u32. Four cycles.
+  // We know this can fit an unsigned int because (N-1)*(N-1) = N^2-2N-1, so adding the equivalent of 1N is OK.
+  rcx += V2VLONG(mad_hi(rax, V2VINT(N), (rax!=(VINT)VECTORIZE(0))?((VINT)VECTORIZE(1)):((VINT)VECTORIZE(0))));
+  // A wide multiply should take ~8 cycles here, and the add can't be combined.  But that's better than 16.
+  rcx += mul_wide_u32(rax, V2VINT(N>>32));
+  // Two cycles for this one add!
+  //rcx = ((((uint64_t)__umulhi((unsigned int)rax,(unsigned int)(N>>32))) << 32) | (((unsigned int)rax)*((unsigned int)(N>>32)))) + rcx;
+  //rax = ((uint64_t)((unsigned int)rax))*((uint64_t)((unsigned int)(N>>32))) + temp;
+
+  // And the rest is normal, but squashed.
+  rcx = (rcx>N)?(rcx-N):rcx;
+  return rcx;
+}
 #endif
 
 // Same function, for a custom NSTEP.  step should be no bigger than NSTEP.
@@ -219,8 +267,13 @@ invpowmod_REDClr (const VLONG N, const VLONG Ns, int bbits, const ulong r0) {
 
 
 // *** KERNELS ***
-#define VLOAD VECSIZEIT(vload,VECSIZE)
-#define VSTORE VECSIZEIT(vstore,VECSIZE)
+#if VECSIZE == 1
+ #define VLOAD(X, Y) Y[X]
+ #define VSTORE(X, Y, Z) Z[Y] = (X)
+#else
+ #define VLOAD VECSIZEIT(vload,VECSIZE)
+ #define VSTORE VECSIZEIT(vstore,VECSIZE)
+#endif
 // Set up to check N's by getting in position with division only.  Doesn't use the CPU for a powmod, but should only be used for small nmin.
 __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong * K, __global uint * factor_found_arr,
                                  // Device constants
@@ -363,7 +416,31 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
     }
 #define VEC_FAST_FLAG_TEST(X) VEC_FLAG_TEST(X)
 #endif
-#if(VECSIZE == 2)
+#if(VECSIZE == 1)
+#define ALL_CTZLL \
+        if(v != 0) { \
+          v=31u - clz (v & -v); \
+      } else { \
+        v = (uint)(kpos>>32); \
+        v=63u - clz (v & -v); \
+      }
+#ifdef D_KMAX
+#define ALL_FLAG_TEST \
+    if ((((uint)(kpos >> 32))>>v) == 0) { \
+     if(((uint)(kpos >> v)) <= D_KMAX) { \
+      if((kpos >> v) >= D_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+        my_factor_found |= 1; \
+     } \
+    }
+#else
+#define ALL_FLAG_TEST \
+    if ((kpos >> v) <= d_kmax) { \
+      if((kpos >> v) >= THE_KMIN && v NSTEP_COMP && n+v < l_nmax) \
+        my_factor_found |= 1; \
+    }
+#endif
+#define VEC_IF if(v == 0)
+#elif(VECSIZE == 2)
 #define ALL_CTZLL \
       VEC_CTZLL(v,x) \
       VEC_CTZLL(v,y)
@@ -427,90 +504,60 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
 #endif
                                  ) {
   VINT v;
-  VLONG my_P;// = P[v.x];
-  VLONG Ps;// = Psarr[v.x];
+  VLONG my_P;// = P[VDOTX];
+  VLONG Ps;// = Psarr[VDOTX];
   uint n = N;
-  VLONG k0;// = K[v.x];
-  VINT my_factor_found;// = factor_found_arr[v.x];
+  VLONG k0;// = K[VDOTX];
+  VINT my_factor_found;// = factor_found_arr[VDOTX];
   VLONG kpos;
-#if D_NSTEP == 32 || D_NSTEP == 22
-  VLONG kPs;
-#endif
   uint l_nmax = n + D_KERNEL_NSTEP;
   if(l_nmax > D_NMAX) l_nmax = D_NMAX;
 
-  v.x = get_global_id(0);
-  Ps = VLOAD(v.x, Psarr);
-  k0 = VLOAD(v.x, K);
-  my_P = VLOAD(v.x, P);
+  VDOTX = get_global_id(0);
+  Ps = VLOAD(VDOTX, Psarr);
+  k0 = VLOAD(VDOTX, K);
+  my_P = VLOAD(VDOTX, P);
   if(n == D_NMIN) {
     my_factor_found = (VINT)VECTORIZE(0);
   } else {
-    my_factor_found = VLOAD(v.x, factor_found_arr);
+    my_factor_found = VLOAD(VDOTX, factor_found_arr);
     my_factor_found <<= shift;
   }
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Started at n=%u, k=%u; running %u n's (GPU)\n", n, (VINT)k0, D_KERNEL_NSTEP);
 #endif
   do { // Remaining steps are all of equal size nstep
-#if D_NSTEP == 32 || D_NSTEP == 22
-    // Get next K from the Montgomery form.
-    // This is equivalent to mod_REDC(k, my_P, Ps), but the intermediate kPs value is kept for later.
-    kPs = k0 * Ps;
-#endif
+    // The following macros use kpos.
     TWIN_CHOOSE_EVEN_K0
     //i = __ffsll(kpos)-1;
     // Just flag this if kpos <= d_kmax.
     ALL_IF_CTZLL
 
-#if D_NSTEP == 32 || D_NSTEP == 22
+    n += D_NSTEP;
+#if D_NSTEP <= 32
 #if D_NSTEP == 32
-    n += 32;
-    kpos = shiftmod_REDC(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
-    //i = __ffsll(kpos)-1;
-    // Just flag this if kpos <= d_kmax.
-    ALL_IF_CTZLL
-
-    n += 32;
-#else // D_NSTEP == 22
-    kpos = shiftmod_REDC21(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
-    n += 21;
-    //i = __ffsll(kpos)-1;
-    // Just flag this if kpos <= d_kmax.
-    ALL_IF_CTZLL
-
-    kpos = shiftmod_REDC42(k0, my_P, kPs);
-    TWIN_CHOOSE_EVEN
-    n += 21;
-    //i = __ffsll(kpos)-1;
-    // Just flag this if kpos <= d_kmax.
-    ALL_IF_CTZLL
-
-    n += 22;
+    k0 = shiftmod_REDC32(k0, my_P, V2VINT(k0)*V2VINT(Ps));
+#else // D_NSTEP < 32
+    k0 = shiftmod_REDCsm(k0, my_P, V2VINT(k0)*V2VINT(Ps));
 #endif
-    // Proceed 64 N's to the next starting point.
-    k0 = onemod_REDC(my_P, kPs);
 #else
     // Proceed to the K for the next N.
     // kpos is destroyed, just to keep the register count down.
     kpos = k0 * Ps;
-    n += D_NSTEP;
     k0 = shiftmod_REDC(k0, my_P, kpos);
 #endif
   } while (n < l_nmax);
 #ifdef _DEVICEEMU
   //if(my_P == 42070000070587) printf("Stopped at n=%u, k=%u (GPU)\n", n, (VINT)k0);
 #endif
-  v.x = get_global_id(0);
-  //factor_found_arr[v.x] = my_factor_found;
+  VDOTX = get_global_id(0);
+  //factor_found_arr[VDOTX] = my_factor_found;
   if(n < D_NMAX) {
-    //K[v.x] = k0;
-    VSTORE(k0, v.x, K);
+    //K[VDOTX] = k0;
+    VSTORE(k0, VDOTX, K);
   } else {
     // Prepend a checksum of the K result to my_factor_found.
     my_factor_found |= V2VINT(k0)<<8;
   }
-  VSTORE(my_factor_found, v.x, factor_found_arr);
+  VSTORE(my_factor_found, VDOTX, factor_found_arr);
 }
