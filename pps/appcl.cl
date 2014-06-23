@@ -423,7 +423,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define VEC_FAST_FLAG_TEST(X) VEC_FLAG_TEST(X)
 #endif
 #if(VECSIZE == 1)
-// At VECSIZE 1, if this is called, we already know v == 0.
+// At VECSIZE 1, if this is called, we already know (uint)(kpos) == 0.
 #define ALL_CTZLL \
         v = (uint)(kpos>>32); \
         v=63u - clz (v & -v);
@@ -560,6 +560,10 @@ __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global
     n += D_NSTEP;
 #if D_NSTEP <= 32
 #if D_NSTEP == 32
+    k0 = shiftmod_REDC32(k0, my_P, V2VINT(k0)*V2VINT(Ps));
+    TWIN_CHOOSE_EVEN_K0
+    ALL_IF_CTZLL
+    n += D_NSTEP;
     k0 = shiftmod_REDC32(k0, my_P, V2VINT(k0)*V2VINT(Ps));
 #else // D_NSTEP < 32
     k0 = shiftmod_REDCsm(k0, my_P, V2VINT(k0)*V2VINT(Ps));
