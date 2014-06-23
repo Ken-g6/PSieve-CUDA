@@ -572,7 +572,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   source += "#define _DEVICEEMU\n";
 #endif
   
-  if(kmin < ((uint64_t)(1u<<31))) {
+  if(kmin < ((uint64_t)(1u<<31)) && kmin >= (kmax/2)) {
     //CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
     sprintf(defbuf, "#define D_KMIN ((ulong)(%uu))\n", (unsigned int)kmin);
     source += defbuf;

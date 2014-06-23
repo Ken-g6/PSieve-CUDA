@@ -1106,17 +1106,14 @@ int test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned in
     //i = __builtin_ctzll(kpos);
     BSFQ(i, kpos, 1);
 
-#ifdef SEARCH_TWIN
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep)
-#else
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep)
-#endif
+    if ((kpos>>i) <= kmax)
     {
       cands_found++;
-      //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
+    if ((kpos>>i) >= kmin && i <= ld_nstep && n+i <= l_nmax)
       test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
+    if ((kpos>>i) >= kmin && i < ld_nstep && n+i < l_nmax)
       test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
     }

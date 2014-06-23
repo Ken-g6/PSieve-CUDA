@@ -388,18 +388,24 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #endif
     // Just flag this if kpos <= d_kmax.
 #ifdef D_KMAX
+#ifdef D_KMIN
+// This test is still useful if it may reduce reported candidates by, say, half.
+#define MFFTEST if((kpos.X >> v.X) >= D_KMIN)
+// Removing these extra tests may result in a few more reported candidates, but should speed up the testing slightly.
+//&& v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax
+#else
+#define MFFTEST
+#endif
 #define VEC_FLAG_TEST(X) \
     if ((kpos.X >> v.X) <= D_KMAX) { \
       DEBUG_PRINT_RESULT(X) \
-      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
-        my_factor_found.X |= 1; \
+      MFFTEST my_factor_found.X |= 1; \
     }
 #define VEC_FAST_FLAG_TEST(X) \
   if ((((uint)(kpos.X >> 32))>>v.X) == 0) { \
     if(((uint)(kpos.X >> v.X)) <= D_KMAX) { \
       DEBUG_PRINT_RESULT(X) \
-      if((kpos.X >> v.X) >= D_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
-        my_factor_found.X |= 1; \
+      MFFTEST my_factor_found.X |= 1; \
     } \
   }
 #else
@@ -411,40 +417,50 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define VEC_FLAG_TEST(X) \
     if ((kpos.X >> v.X) <= d_kmax) { \
       DEBUG_PRINT_RESULT(X) \
-      if((kpos.X >> v.X) >= THE_KMIN && v.X NSTEP_COMP D_NSTEP && n+v.X NSTEP_COMP l_nmax) \
+      if((kpos.X >> v.X) >= THE_KMIN) \
         my_factor_found.X |= 1; \
     }
 #define VEC_FAST_FLAG_TEST(X) VEC_FLAG_TEST(X)
 #endif
 #if(VECSIZE == 1)
+// At VECSIZE 1, if this is called, we already know v == 0.
 #define ALL_CTZLL \
+        v = (uint)(kpos>>32); \
+        v=63u - clz (v & -v);
+
+/*
       if(v != 0) { \
         v=31u - clz (v & -v); \
       } else { \
-        v = (uint)(kpos>>32); \
-        v=63u - clz (v & -v); \
       }
+      */
 #ifdef D_KMAX
+#ifdef D_KMIN
+// This test is still useful if it may reduce reported candidates by, say, half.
+#define MFFONETEST if((kpos >> v) >= D_KMIN)
+// Removing these extra tests may result in a few more reported candidates, but should speed up the testing slightly.
+// && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax)
+#else
+#define MFFONETEST
+#endif
 #define ALL_FLAG_TEST \
     if ((kpos >> v) <= D_KMAX) { \
-      if((kpos >> v) >= D_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
-        my_factor_found |= 1; \
+      MFFONETEST my_factor_found |= 1; \
     }
 #define ALL_FAST_FLAG_TEST \
   if ((((uint)(kpos >> 32))>>v) == 0) { \
     if(((uint)(kpos >> v)) <= D_KMAX) { \
-      if((kpos >> v) >= D_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
-        my_factor_found |= 1; \
+      MFFONETEST my_factor_found |= 1; \
     } \
   }
 #else
 #define ALL_FLAG_TEST \
     if ((kpos >> v) <= d_kmax) { \
-      if((kpos >> v) >= THE_KMIN && v NSTEP_COMP D_NSTEP && n+v NSTEP_COMP l_nmax) \
+      if((kpos >> v) >= THE_KMIN) \
         my_factor_found |= 1; \
     }
 #endif
-#define VEC_IF if(v == 0)
+#define VEC_IF if(v != 0)
 #elif(VECSIZE == 2)
 #define ALL_CTZLL \
       VEC_CTZLL(v,x) \
@@ -455,7 +471,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define ALL_FAST_FLAG_TEST \
       VEC_FAST_FLAG_TEST(x) \
       VEC_FAST_FLAG_TEST(y)
-#define VEC_IF if(v.x == 0 || v.y == 0)
+#define VEC_IF if(v.x != 0 && v.y != 0)
 #elif(VECSIZE == 4)
 #define ALL_CTZLL \
       VEC_CTZLL(v,x) \
@@ -472,7 +488,7 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
       VEC_FAST_FLAG_TEST(y) \
       VEC_FAST_FLAG_TEST(z) \
       VEC_FAST_FLAG_TEST(w)
-#define VEC_IF if(v.x == 0 || v.y == 0 || v.z == 0 || v.w == 0)
+#define VEC_IF if(v.x != 0 && v.y != 0 && v.z != 0 && v.w != 0)
 #else
 #error "Invalid vecsize" #VECSIZE
 #endif
@@ -481,11 +497,11 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 #define ALL_IF_CTZLL \
     v = V2VINT(kpos); \
     VEC_IF { \
-      ALL_CTZLL \
-      ALL_FLAG_TEST \
-    } else { \
       v=31u - clz (v & -v); \
       ALL_FAST_FLAG_TEST \
+    } else { \
+      ALL_CTZLL \
+      ALL_FLAG_TEST \
     }
 
 #ifdef SEARCH_TWIN
@@ -504,10 +520,10 @@ __kernel void start_ns(__global ulong * P, __global ulong * Ps, __global ulong *
 
 __kernel void check_more_ns(__global ulong * P, __global ulong * Psarr, __global ulong * K, __global uint * factor_found_arr, const uint N, const uint shift
                                  // Device constants
+#ifndef D_KMAX
 #ifndef D_KMIN
                                  , const ulong d_kmin		// 6
 #endif
-#ifndef D_KMAX
                                  , const ulong d_kmax		// 7
 #endif
                                  ) {
