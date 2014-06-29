@@ -470,7 +470,19 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     *cthread_count *= 8;
     vecsize /= 2;
     if(vecsize == 0) vecsize = 1;
+  } else if(namelen > 6 &&
+       name[0] == 'I' &&
+       name[1] == 'n' &&
+       name[2] == 't' &&
+       name[3] == 'e' &&
+       name[4] == 'l' &&
+       name[5] == ' ')
+  {
+    bmsg("Intel device detected; use --vecsize=4 to undo effect\n");
+    vecsize /= 2;
+    if(vecsize == 0) vecsize = 1;
   }
+
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
   // Double this if using ulong2.
   *cthread_count *= vecsize;
