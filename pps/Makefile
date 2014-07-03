@@ -91,7 +91,7 @@ ifeq ($(PLATFORM),mac)
   COMMON_FLAGS += -D_GNU_SOURCE
   CFLAGS += $(MACOS_MIN_VERSION) $(ISYSROOT)
   NVCFLAGS += -arch=sm_11
-  LINK += $(ISYSROOT) -L/usr/local/cuda/lib -lcuda -lcudart -lstdc++
+  LINK += $(ISYSROOT) -lstdc++ # -L/usr/local/cuda/lib -lcuda -lcudart 
   CL_LINK = -framework OpenCL
   CL_LINK64 = $(CL_LINK)
 endif
