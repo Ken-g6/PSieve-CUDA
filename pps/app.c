@@ -621,7 +621,7 @@ int app_parse_option(int opt, char *arg, const char *source)
 #ifdef VECSIZE
     case 'v':
       status = parse_uint(&vecsize,arg,1,4);
-      if(vecsize < 1 || vecsize > 4) vecsize = VECSIZE;
+      if(vecsize < 1 || vecsize > 4 || vecsize == 3) vecsize = VECSIZE;
       break;
 #endif
     //case 'q':

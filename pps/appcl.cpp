@@ -422,16 +422,47 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // If this is a GCN device, multiply cthread_count by 8 and divide vecsize by 2.
   // I don't know if all these names are correct.  Many come from rumor sites.
   int namelen = strlen(name);
-  if(
+  char *firepropos = strstr(name, "FirePro ");
+  if(firepropos != NULL) {
+    fprintf(stderr, "%sFirePro %c series detected.\n",
+        bmprefix(), firepropos[8]);
+  }
+    
+  if(namelen > 6 &&
+       name[0] == 'I' &&
+       name[1] == 'n' &&
+       name[2] == 't' &&
+       name[3] == 'e' &&
+       name[4] == 'l' &&
+       name[5] == ' ')
+  {
+    bmsg("Intel device detected; use --vecsize=4 to undo effect\n");
+    vecsize /= 2;
+    if(vecsize == 0) vecsize = 1;
+  } else if((compute_units > 24) ||
+      // Firepros:
+      (firepropos != NULL &&
+       // D, S, W series.
+       (firepropos[8] == 'D' ||
+        firepropos[8] == 'S' ||
+        firepropos[8] == 'W' ||
+       // R5000
+        (firepropos[8] == 'R' && firepropos[9] == '5') || 
+       // M4000 series, 6000 series, and 5100
+        (firepropos[8] == 'M' &&
+         (firepropos[9] == '4' || firepropos[9] == '6' ||
+          (firepropos[9] == '5' && firepropos[10] == '1'))))) || 
       (namelen == 4 && (
           strcmp(name, "Maui") == 0 ||
           strcmp(name, "Xtr4") == 0 ||
+          strcmp(name, "Opal") == 0 ||
           strcmp(name, "Fiji") == 0)) ||
       (namelen == 5 && (
           strcmp(name, "Aruba") == 0 ||
           strcmp(name, "Malta") == 0 ||
           strcmp(name, "Oland") == 0 ||
           strcmp(name, "Topaz") == 0 ||
+          strcmp(name, "Venus") == 0 ||
           strcmp(name, "Xtra5") == 0 ||
           strcmp(name, "Tonga") == 0)) ||
       (namelen == 6 && (
@@ -447,6 +478,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
           strcmp(name, "Mullins") == 0 ||
           strcmp(name, "Iceland") == 0 ||
           strcmp(name, "Bermuda") == 0 ||
+          strcmp(name, "Neptune") == 0 ||
           strcmp(name, "Xtra7  ") == 0 ||
           strcmp(name, "Spectre") == 0)) ||
       (namelen == 8 && (
@@ -468,17 +500,6 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
        name[6] == 'e')) {
     bmsg("GCN device detected; use -m1 --vecsize=4 to undo effect\n");
     *cthread_count *= 8;
-    vecsize /= 2;
-    if(vecsize == 0) vecsize = 1;
-  } else if(namelen > 6 &&
-       name[0] == 'I' &&
-       name[1] == 'n' &&
-       name[2] == 't' &&
-       name[3] == 'e' &&
-       name[4] == 'l' &&
-       name[5] == ' ')
-  {
-    bmsg("Intel device detected; use --vecsize=4 to undo effect\n");
     vecsize /= 2;
     if(vecsize == 0) vecsize = 1;
   }
