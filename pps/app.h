@@ -18,7 +18,7 @@
 #ifndef USE_OPENCL
 #define APP_VERSION "cuda-0.2.1a"
 #else
-#define APP_VERSION "cl-0.2.5"
+#define APP_VERSION "cl-0.2.5a"
 #endif
 
 #ifdef SEARCH_TWIN
@@ -40,7 +40,7 @@
 #define FACTORS_FILENAME_DEFAULT APP_PREFIX"factors.txt"
 #define FACTORS_TEMP_FILENAME_DEFAULT FACTORS_FILENAME_DEFAULT".0"
 
-#define APP_SHORT_OPTS_BASE "k:K:n:N:i:f:b:d:m:M:s:"
+#define APP_SHORT_OPTS_BASE "ak:K:n:N:i:f:b:d:m:M:s:"
 
 // Add Riesel if not SEARCH_TWIN
 #ifdef SEARCH_TWIN
@@ -56,6 +56,7 @@
 #endif
 
 #define APP_LONG_OPTS \
+  {"anygpu",        no_argument,       0, 'a'}, \
   {"kmin",          required_argument, 0, 'k'}, \
   {"kmax",          required_argument, 0, 'K'}, \
   {"modulus",       required_argument, 0, 'M'}, \

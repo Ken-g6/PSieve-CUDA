@@ -32,6 +32,12 @@
 #include <pthread.h>
 #endif
 #endif
+#if(defined(_MSC_VER) && !defined(__x86_64__) && defined(__i386__))
+#include <intrin.h>
+// compile with: /EHsc
+// or try this:
+//#pragma intrinsic(__emulu)
+#endif
 #ifdef __SSE2__
 #define EMM
 #include <emmintrin.h>
@@ -120,6 +126,7 @@ static uint64_t r0arr[9];
 static int bbitsarr[9];
 static unsigned int kstep = KSTEP;
 static unsigned int koffset = KOFFSET;
+static int use_nvidia = 0;
 
 #ifndef SINGLE_THREAD
 #ifdef _WIN32
@@ -563,6 +570,9 @@ int app_parse_option(int opt, char *arg, const char *source)
 
   switch (opt)
   {
+    case 'a':
+      use_nvidia = 1;
+      break;
     /*
     case 'b':
       status = parse_uint(&bitsatatime,arg,1,(1U<<31)-1);
@@ -621,7 +631,7 @@ int app_parse_option(int opt, char *arg, const char *source)
 #ifdef VECSIZE
     case 'v':
       status = parse_uint(&vecsize,arg,1,4);
-      if(vecsize < 1 || vecsize > 4) vecsize = VECSIZE;
+      if(vecsize < 1 || vecsize > 4 || vecsize == 3) vecsize = VECSIZE;
       break;
 #endif
     //case 'q':
@@ -825,9 +835,9 @@ unsigned int app_thread_init(int th)
   unsigned int i, cthread_count;
 
   if(device_opt >= 0) {
-    cthread_count = cuda_app_init(device_opt, user_cthread_count);
+    cthread_count = cuda_app_init(device_opt, user_cthread_count, use_nvidia);
   } else {
-    cthread_count = cuda_app_init(th, user_cthread_count);
+    cthread_count = cuda_app_init(th, user_cthread_count, use_nvidia);
   }
   // Create r0arr (which gives starting values for the REDC code.)
   //printf("ld_r0[%d] = %lu\n", nmin, ld_r0);
@@ -900,15 +910,18 @@ static uint64_t __umul64(const unsigned int a, const unsigned int b)
   return (((uint64_t)t2)<<32)+t1;
 }
 #else
-static unsigned int __umulhi(const unsigned int a, const unsigned int b)
-{
-  uint64_t c = (uint64_t)a * (uint64_t)b;
-
-  return (unsigned int)(c >> 32);
-}
+#if(defined(_MSC_VER) && !defined(__x86_64__) && defined(__i386__))
+#define __umul64 __emulu
+#else
 static uint64_t __umul64(const unsigned int a, const unsigned int b)
 {
   return (uint64_t)a * (uint64_t)b;
+}
+#endif
+static unsigned int __umulhi(const unsigned int a, const unsigned int b)
+{
+
+  return (unsigned int)(__umul64(a, b) >> 32);
 }
 #endif
 
@@ -1106,17 +1119,14 @@ int test_one_p(const uint64_t my_P, const unsigned int l_nmin, const unsigned in
     //i = __builtin_ctzll(kpos);
     BSFQ(i, kpos, 0);
 
-#ifdef SEARCH_TWIN
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i <= ld_nstep)
-#else
-    if ((kpos>>i) <= kmax && (kpos>>i) >= kmin && i < ld_nstep)
-#endif
+    if ((kpos>>i) <= kmax)
     {
       cands_found++;
-      //if (i < ld_nstep)
 #ifdef SEARCH_TWIN
+    if ((kpos>>i) >= kmin && i <= ld_nstep && n+i <= l_nmax)
       test_factor(my_P,(kpos>>i),n+i,(kpos==k0)?-1:1);
 #else
+    if ((kpos>>i) >= kmin && i < ld_nstep && n+i < l_nmax)
       test_factor(my_P,(kpos>>i),n+i,search_proth);
 #endif
     }

@@ -280,7 +280,7 @@ const char *convert_to_string(const char *fileName) {
 
  // Note: OpenCL memory buffer objects will be created in calling
  //       function before kernel calls are made.
-static int initialize_cl(int deviceno, unsigned int *cthread_count) {
+static int initialize_cl(int deviceno, unsigned int *cthread_count, int use_nvidia) {
   cl_int status = 0;
   size_t deviceListSize;
   std::string source = "";
@@ -415,23 +415,58 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   clGetDeviceInfo(devices[deviceno], CL_DEVICE_NAME,sizeof(name), name, NULL);
 
 
-  fprintf(stderr, "%sDevice %d is a %s %s.\n",
+  fprintf(stderr, "%sDevice %d is a '%s' '%s'.\n",
       bmprefix(), deviceno, vendor, name);
   // Make it 8 wavefronts per SIMD by default.
   if(*cthread_count == 0) *cthread_count = 8;
   // If this is a GCN device, multiply cthread_count by 8 and divide vecsize by 2.
   // I don't know if all these names are correct.  Many come from rumor sites.
   int namelen = strlen(name);
-  if(
+  char *firepropos = strstr(name, "FirePro ");
+  if(firepropos != NULL) {
+    fprintf(stderr, "%sFirePro %c series detected.\n",
+        bmprefix(), firepropos[8]);
+  }
+  if(!use_nvidia && strcmp(vendor, "NVIDIA Corporation") == 0) {
+    bmsg("Nvidia device detected. These aren't the devices you're looking for. Aborting.");
+    bexit(-234);
+  }
+    
+  if(namelen > 6 &&
+       name[0] == 'I' &&
+       name[1] == 'n' &&
+       name[2] == 't' &&
+       name[3] == 'e' &&
+       name[4] == 'l' &&
+       name[5] == ' ')
+  {
+    bmsg("Intel device detected; use --vecsize=4 to undo effect\n");
+    vecsize /= 2;
+    if(vecsize == 0) vecsize = 1;
+  } else if((compute_units > 24) ||
+      // Firepros:
+      (firepropos != NULL &&
+       // D, S, W series.
+       (firepropos[8] == 'D' ||
+        firepropos[8] == 'S' ||
+        firepropos[8] == 'W' ||
+       // R5000
+        (firepropos[8] == 'R' && firepropos[9] == '5') || 
+       // M4000 series, 6000 series, and 5100
+        (firepropos[8] == 'M' &&
+         (firepropos[9] == '4' || firepropos[9] == '6' ||
+          (firepropos[9] == '5' && firepropos[10] == '1'))))) || 
       (namelen == 4 && (
           strcmp(name, "Maui") == 0 ||
           strcmp(name, "Xtr4") == 0 ||
+          strcmp(name, "Opal") == 0 ||
           strcmp(name, "Fiji") == 0)) ||
       (namelen == 5 && (
           strcmp(name, "Aruba") == 0 ||
           strcmp(name, "Malta") == 0 ||
           strcmp(name, "Oland") == 0 ||
           strcmp(name, "Topaz") == 0 ||
+          strcmp(name, "Venus") == 0 ||
           strcmp(name, "Xtra5") == 0 ||
           strcmp(name, "Tonga") == 0)) ||
       (namelen == 6 && (
@@ -447,6 +482,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
           strcmp(name, "Mullins") == 0 ||
           strcmp(name, "Iceland") == 0 ||
           strcmp(name, "Bermuda") == 0 ||
+          strcmp(name, "Neptune") == 0 ||
           strcmp(name, "Xtra7  ") == 0 ||
           strcmp(name, "Spectre") == 0)) ||
       (namelen == 8 && (
@@ -471,6 +507,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
     vecsize /= 2;
     if(vecsize == 0) vecsize = 1;
   }
+
   *cthread_count = compute_units * (*cthread_count * BLOCKSIZE);
   // Double this if using ulong2.
   *cthread_count *= vecsize;
@@ -502,12 +539,6 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   if(ld_nstep >= 32 /*&& ld_nstep < 48*/ && (((uint64_t)1) << 32) <= pmin) {
     if(ld_nstep != 32) printf("nstep changed to 32\n");
     ld_nstep = 32;
-    /*
-  }
-  // Use the 22-step algorithm where useful.
-  else if(ld_nstep >= 22 && ld_nstep < 32 && (((uint64_t)1) << (64-21)) <= pmin) {
-    if(ld_nstep != 22) printf("nstep changed to 22\n");
-    ld_nstep = 22; */
   } else {
 #ifdef SEARCH_TWIN
     printf("Changed nstep to %u\n", ld_nstep);
@@ -519,23 +550,18 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   // N's to search each time a kernel is run:
   ld_kernel_nstep = ITERATIONS_PER_KERNEL;
   if(ld_nstep == 32) ld_kernel_nstep /= 2;
-  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep /= 3;
   // Adjust for differing block sizes.
   ld_kernel_nstep *= 384;
   ld_kernel_nstep /= (*cthread_count/compute_units);
   // But shrink it to give at least four big N sections.
   if(ld_nstep == 32) i = 2;
-  //else if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) i = 3;
   else i = 1;
   while((nmax-nmin) < 4*(ld_kernel_nstep*ld_nstep*i) && ld_kernel_nstep >= 100) ld_kernel_nstep /= 2;
   
   // Finally, make sure it's a multiple of ld_nstep!!!
-  /* if(ld_nstep == 22 && (((uint64_t)1) << (64-21)) <= pmin) ld_kernel_nstep *= 64;
-  else */ {
-    ld_kernel_nstep *= ld_nstep;
-    // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
-    if(ld_nstep == 32) ld_kernel_nstep *= 2;
-  }
+  ld_kernel_nstep *= ld_nstep;
+  // When ld_nstep is 32, the special algorithm there effectively needs ld_kernel_nstep divisible by 64.
+  if(ld_nstep == 32) ld_kernel_nstep *= 2;
   // Set the constants.
   //CL_MEMCPY_TO_SYMBOL(d_bitsatatime, &ld_bitsatatime, sizeof(ld_bitsatatime));
 
@@ -588,7 +614,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   source += "#define _DEVICEEMU\n";
 #endif
   
-  if(kmin < ((uint64_t)(1u<<31))) {
+  if(kmin < ((uint64_t)(1u<<31)) && kmin >= (kmax/2)) {
     //CL_MEMCPY_TO_SYMBOL(d_kmin, &kmin, sizeof(kmin));
     sprintf(defbuf, "#define D_KMIN ((ulong)(%uu))\n", (unsigned int)kmin);
     source += defbuf;
@@ -666,7 +692,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
 
 /* This function is called once before any threads are started.
  */
-unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
+unsigned int cuda_app_init(int gpuno, unsigned int cthread_count, int use_nvidia)
 {
   cl_int status = 0;
   //unsigned int ld_bitsatatime = 0;
@@ -680,7 +706,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     bexit(1);
   }
 
-  if(initialize_cl(gpuno, &cthread_count)) {
+  if(initialize_cl(gpuno, &cthread_count, use_nvidia)) {
     bexit(ERR_NOT_IMPLEMENTED);
   }
   /*
@@ -762,7 +788,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     if(n_subsection_start[0] < nmax) bmsg("Warning: n_subsection_start[0] too small.\n");
     n_subsection_start[0] = nmax;
     j = ld_nstep;
-    if(ld_nstep == 32) j = 64; //  || ld_nstep == 22
+    if(ld_nstep == 32) j = 64;
     n_subsection_start[0] -= nmin;
     n_subsection_start[0] /= j;
     n_subsection_start[0] *= j;

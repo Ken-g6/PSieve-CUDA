@@ -499,7 +499,7 @@
 				Name="VCCLCompilerTool"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
-				AdditionalIncludeDirectories="&quot;..\..\boinc\lib&quot;;&quot;..\..\boinc\api&quot;;$(ATISTREAMSDKROOT)/include"
+				AdditionalIncludeDirectories="&quot;..\..\boinc\lib&quot;;&quot;..\..\boinc\api&quot;;$(AMDAPPSDKROOT)/include"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE;_REENTRANT;USE_BOINC;USE_OPENCL;_CRT_SECURE_NO_WARNINGS;SEARCH_TWIN"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
@@ -518,10 +518,10 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="cudart.lib libboinc_staticcrt.lib libboincapi_staticcrt.lib"
-				OutputFile="$(OutDir)\tpsieve-cuda-boinc-x86-windows.exe"
+				AdditionalDependencies="libboinc_staticcrt.lib libboincapi_staticcrt.lib OpenCL.lib"
+				OutputFile="$(OutDir)\tpsieve-cl-boinc-x86-windows.exe"
 				LinkIncremental="1"
-				AdditionalLibraryDirectories="..\boinc\win_build\Build\Win32\Release;$(ATISTREAMSDKROOT)/lib/x86"
+				AdditionalLibraryDirectories="..\..\boinc\win_build\Build\Win32\Release;$(AMDAPPSDKROOT)/lib/x86"
 				GenerateDebugInformation="true"
 				SubSystem="1"
 				OptimizeReferences="2"
