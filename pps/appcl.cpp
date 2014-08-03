@@ -280,7 +280,7 @@ const char *convert_to_string(const char *fileName) {
 
  // Note: OpenCL memory buffer objects will be created in calling
  //       function before kernel calls are made.
-static int initialize_cl(int deviceno, unsigned int *cthread_count) {
+static int initialize_cl(int deviceno, unsigned int *cthread_count, int use_nvidia) {
   cl_int status = 0;
   size_t deviceListSize;
   std::string source = "";
@@ -415,7 +415,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   clGetDeviceInfo(devices[deviceno], CL_DEVICE_NAME,sizeof(name), name, NULL);
 
 
-  fprintf(stderr, "%sDevice %d is a %s %s.\n",
+  fprintf(stderr, "%sDevice %d is a '%s' '%s'.\n",
       bmprefix(), deviceno, vendor, name);
   // Make it 8 wavefronts per SIMD by default.
   if(*cthread_count == 0) *cthread_count = 8;
@@ -426,6 +426,10 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
   if(firepropos != NULL) {
     fprintf(stderr, "%sFirePro %c series detected.\n",
         bmprefix(), firepropos[8]);
+  }
+  if(!use_nvidia && strcmp(vendor, "NVIDIA Corporation") == 0) {
+    bmsg("Nvidia device detected. These aren't the devices you're looking for. Aborting.");
+    bexit(-234);
   }
     
   if(namelen > 6 &&
@@ -688,7 +692,7 @@ static int initialize_cl(int deviceno, unsigned int *cthread_count) {
 
 /* This function is called once before any threads are started.
  */
-unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
+unsigned int cuda_app_init(int gpuno, unsigned int cthread_count, int use_nvidia)
 {
   cl_int status = 0;
   //unsigned int ld_bitsatatime = 0;
@@ -702,7 +706,7 @@ unsigned int cuda_app_init(int gpuno, unsigned int cthread_count)
     bexit(1);
   }
 
-  if(initialize_cl(gpuno, &cthread_count)) {
+  if(initialize_cl(gpuno, &cthread_count, use_nvidia)) {
     bexit(ERR_NOT_IMPLEMENTED);
   }
   /*
