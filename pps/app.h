@@ -16,9 +16,9 @@
 #include "stdint.h"
 
 #ifndef USE_OPENCL
-#define APP_VERSION "cuda-0.2.1b"
+#define APP_VERSION "cuda-0.2.1a"
 #else
-#define APP_VERSION "cl-0.2.5a"
+#define APP_VERSION "cl-0.2.5b"
 #endif
 
 #ifdef SEARCH_TWIN
