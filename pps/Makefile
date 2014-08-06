@@ -145,7 +145,16 @@ non-boinc: $(CL_NON_BOINC_BINS) $(CL_TPS_BINS)
 boinc: $(CL_TPS_BOINC_BINS)
 
 clean:
-	-rm *.o ../*.o appcl.h $(BINS) $(CL_BINS) $(TPS_BINS) $(TPS_BOINC_BINS) $(TPS_APPNAME).zip $(APPNAME).zip $(APPNAME)-src.zip
+	-rm *.o
+	-rm ../*.o
+	-rm appcl.h
+	-rm $(BINS)
+	-rm $(CL_BINS)
+	-rm $(TPS_BINS)
+	-rm $(TPS_BOINC_BINS)
+	-rm $(TPS_APPNAME).zip
+	-rm $(APPNAME).zip
+	-rm $(APPNAME)-src.zip
 
 $(APPNAME)-x86-$(PLATFORM): $(CUDA_OBJS)
 	$(NVCC) -m32 -o $@ $(NVCFLAGS) $^ $(LINK)
@@ -208,6 +217,8 @@ cl_app.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 cl_tpapp.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(CFLAGS) $(CL_DEFINE) $< -DSEARCH_TWIN
 
+../tpmain.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h
+	$(CC32) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
 
 # BOINC_OBJS
 ../do_boinc_init.o: ../do_boinc_init.cpp ../do_boinc_init.h
@@ -225,6 +236,9 @@ cl_app_boinc.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main
 cl_tpapp_boinc.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC32) -o $@ $(BOINC_CFLAGS) $(CL_DEFINE) $< -DSEARCH_TWIN
 
+../tpmain_boinc.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h
+	$(CC32) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
+
 #  COMMON_OBJS
 ../clock.o: ../clock.c ../clock.h
 	$(CC32) -o $@ $(CFLAGS) $<
@@ -239,6 +253,9 @@ tpappcl.o: appcl.cpp appcl.h
 	$(CL32) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
 
 # OBJS64
+../main64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h
+	$(CC64) -o $@ $(CFLAGS) $<
+
 ../putil64.o: ../putil.c ../putil.h
 	$(CC64) -o $@ $(CFLAGS) $<
 
@@ -247,6 +264,9 @@ tpappcl.o: appcl.cpp appcl.h
 
 cl_app64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(CFLAGS) $(CL_DEFINE) $<
+
+../tpmain64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h
+	$(CC64) -o $@ $(CFLAGS) $< -DSEARCH_TWIN
 
 cl_tpapp64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(CFLAGS) $(CL_DEFINE) $< -DSEARCH_TWIN
@@ -268,6 +288,8 @@ cl_app_boinc64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../ma
 cl_tpapp_boinc64.o: app.c app.h ../putil.h appcl.h ../clock.h factor_proth.h ../main.h
 	$(CC64) -o $@ $(BOINC_CFLAGS) $(CL_DEFINE) $< -DSEARCH_TWIN
 
+../tpmain_boinc64.o: ../main.c ../main.h ../clock.h ../sieve.h ../putil.h app.h
+	$(CC64) -o $@ $(BOINC_CFLAGS) $< -DSEARCH_TWIN
 
 #  COMMON64_OBJS
 ../clock64.o: ../clock.c ../clock.h
