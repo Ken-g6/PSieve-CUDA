@@ -644,6 +644,7 @@ int app_parse_option(int opt, char *arg, const char *source)
 
 void app_help(void)
 {
+  printf("-a --anygpu        Allow computing on Nvidia GPUs.\n");
   //printf("-b --bitsatatime=b Bits to use at a time: fiddle with this, 5-9.\n");
   printf("-f --factors=FILE  Write factors to FILE (default `%s')\n",
          FACTORS_FILENAME_DEFAULT);
