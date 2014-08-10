@@ -1,5 +1,11 @@
 # Build Linux apps by default, set PLATFORM=mac for Mac build
 PLATFORM ?= linux
+
+# Uncomment these lines if BOINC is in a user-specified directory.
+# Unfortunately, these only #include wherever the 32-bit libraries come from.  Best to use the same BOINC version for both.
+#BOINC_DIR = /multimedia/boinc610
+#BOINC_DIR64 = /multimedia/boinc610_64
+
 CL_APPNAME = ppsieve-cl
 CL_TPS_APPNAME = tpsieve-cl
 APPPATH = pps
@@ -89,8 +95,6 @@ ifeq ($(PLATFORM),mac)
   CL_LINK64 = $(CL_LINK)
 endif
 
-# Uncomment this line if BOINC is in a user-specified directory.
-#BOINC_DIR = /multimedia/boinc610
 ifdef BOINC_DIR
 BOINC_API_DIR = $(BOINC_DIR)/api
 BOINC_LIB_DIR = $(BOINC_DIR)/lib
@@ -100,14 +104,24 @@ else
 # This line includes where some repositories put the BOINC includes:
 BOINC_LOAD_LIBS = -I/usr/include/BOINC
 endif
+ifdef BOINC_DIR64
+BOINC_API_DIR64 = $(BOINC_DIR64)/api
+BOINC_LIB_DIR64 = $(BOINC_DIR64)/lib
+BOINC_LOAD_LIBS64 = -I$(BOINC_DIR64) -I$(BOINC_LIB_DIR64) -I$(BOINC_API_DIR64)
+BOINC_LINK_LIBS64 = -L$(BOINC_DIR64) -L$(BOINC_LIB_DIR64) -L$(BOINC_API_DIR64)
+else
+# This line includes where some repositories put the BOINC includes:
+BOINC_LOAD_LIBS64 = -I/usr/include/BOINC
+endif
+
 BOINC_CFLAGS = -DUSE_BOINC $(CFLAGS) $(BOINC_LOAD_LIBS)
 BOINC_NVCFLAGS = -DUSE_BOINC $(NVCFLAGS) $(BOINC_LOAD_LIBS)
 
 ifeq ($(PLATFORM),linux)
-  BOINC_LINK64 = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
+  BOINC_LINK64 = $(BOINC_LINK_LIBS64) $(LINK) -lboinc_api -lboinc `g++ -m64 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
   BOINC_LINK = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc `g++ -m32 -print-file-name=libstdc++.a` -DAPP_GRAPHICS
 else ifeq ($(PLATFORM),mac)
-  BOINC_LINK64 = $(BOINC_LINK_LIBS) $(LINK) -lboinc_api -lboinc -DAPP_GRAPHICS
+  BOINC_LINK64 = $(BOINC_LINK_LIBS64) $(LINK) -lboinc_api -lboinc -DAPP_GRAPHICS
   BOINC_LINK = $(BOINC_LINK64)
 endif
 
