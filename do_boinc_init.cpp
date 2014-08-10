@@ -10,13 +10,10 @@
 */
 #ifdef USE_BOINC
 #if defined(__APPLE__) || defined(_WIN32)
-#include "boinc_api.h"
-#include "diagnostics.h"
 #include "filesys.h"
-#else
-#include "BOINC/boinc_api.h"
-#include "BOINC/diagnostics.h"     // boinc_init_diagnostics()
 #endif
+#include "boinc_api.h"
+#include "diagnostics.h"     // boinc_init_diagnostics()
 #include "main.h"
 #include "do_boinc_init.h"
 
