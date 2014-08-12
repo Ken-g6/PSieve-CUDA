@@ -9,11 +9,11 @@
    (at your option) any later version.
 */
 #ifdef USE_BOINC
+#include "boinc_api.h"
+#include "diagnostics.h"     // boinc_init_diagnostics()
 #if defined(__APPLE__) || defined(_WIN32)
 #include "filesys.h"
 #endif
-#include "boinc_api.h"
-#include "diagnostics.h"     // boinc_init_diagnostics()
 #include "main.h"
 #include "do_boinc_init.h"
 
